@@ -34,41 +34,245 @@ async function getCompanySettings() {
 }
 
 /**
- * Generate itinerary PDF for a package
+ * Generate itinerary PDF for a package – professional layout with logo + image
  */
 export async function generateItineraryPDF(packageData, days) {
+  packageData = packageData || {};
+  days = Array.isArray(days) ? days : [];
+
+  const COMPANY_PDF = await getCompanySettings();
+
   const doc = await PDFDocument.create();
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const margin = 50;
+  const page = doc.addPage([pageWidth, pageHeight]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-  let y = 750;
-  const lineHeight = 18;
-  const margin = 50;
 
-  const drawText = (text, size = 12, bold = false) => {
-    const f = bold ? fontBold : font;
-    doc.getPages()[0].drawText(text, { x: margin, y, size, font: f, color: rgb(0, 0, 0) });
-    y -= lineHeight;
+  const left = margin;
+  const right = pageWidth - margin;
+  const textDark = rgb(0.12, 0.12, 0.12);
+  const boxBorder = rgb(0.8, 0.8, 0.8);
+
+  // Try to load company logo (same as quotations/invoices)
+  let logoImage = null;
+  try {
+    const baseDir = path.join(__dirname, '..', '..');
+    const pngPath = path.join(baseDir, 'client', 'public', 'Vision_JPG_Logo.png');
+    const jpgPath = path.join(baseDir, 'client', 'public', 'Vision JPG Logo.JPG');
+    if (fs.existsSync(pngPath)) {
+      const buf = fs.readFileSync(pngPath);
+      try {
+        logoImage = await doc.embedPng(buf);
+      } catch {
+        logoImage = await doc.embedJpg(buf);
+      }
+    } else if (fs.existsSync(jpgPath)) {
+      const buf = fs.readFileSync(jpgPath);
+      logoImage = await doc.embedJpg(buf);
+    }
+  } catch {
+    logoImage = null;
+  }
+
+  // Optional package hero image (first uploaded image)
+  let pkgImage = null;
+  try {
+    const urls = Array.isArray(packageData.image_urls) ? packageData.image_urls : [];
+    const firstUrl = urls[0] || packageData.image_url;
+    if (firstUrl) {
+      const baseDir = path.join(__dirname, '..', '..');
+      // Strip absolute origin (http://domain) if present and leading slashes
+      let rel = String(firstUrl).replace(/^https?:\/\/[^/]+/, '');
+      rel = rel.replace(/^\/+/, '');
+      const imgPath = path.join(baseDir, rel);
+      if (fs.existsSync(imgPath)) {
+        const buf = fs.readFileSync(imgPath);
+        try {
+          pkgImage = await doc.embedPng(buf);
+        } catch {
+          pkgImage = await doc.embedJpg(buf);
+        }
+      }
+    }
+  } catch {
+    pkgImage = null;
+  }
+
+  let y = pageHeight - 80;
+
+  // Title + company block
+  page.drawText('TRAVEL ITINERARY', { x: left, y, size: 24, font: fontBold, color: textDark });
+  y -= 30;
+  page.drawText(asciiOnly(COMPANY_PDF.name || 'YOUR COMPANY'), { x: left, y, size: 11, font: fontBold, color: textDark });
+  y -= 14;
+  page.drawText(asciiOnly(COMPANY_PDF.address), { x: left, y, size: 9.5, font, color: textDark });
+  y -= 12;
+  page.drawText(asciiOnly(COMPANY_PDF.phone) + ' | ' + asciiOnly(COMPANY_PDF.email), { x: left, y, size: 9.5, font, color: textDark });
+
+  // Logo on right
+  const logoCenterX = right - 40;
+  const logoCenterY = pageHeight - 110;
+  if (logoImage) {
+    const maxSide = 70;
+    const fitScale = Math.min(maxSide / logoImage.width, maxSide / logoImage.height);
+    const imgW = logoImage.width * fitScale;
+    const imgH = logoImage.height * fitScale;
+    page.drawImage(logoImage, {
+      x: logoCenterX - imgW / 2,
+      y: logoCenterY - imgH / 2,
+      width: imgW,
+      height: imgH,
+    });
+  }
+
+  // Package info box
+  const boxTop = pageHeight - 190;
+  const boxH = 95;
+  page.drawRectangle({
+    x: left,
+    y: boxTop - boxH,
+    width: right - left,
+    height: boxH,
+    borderColor: boxBorder,
+    borderWidth: 1,
+  });
+
+  const pkgName = asciiOnly(packageData.name || packageData.title || 'Package');
+  const duration = Number(packageData.duration_days || packageData.days || 0);
+
+  // Compute merged price: base package + default hotel + default vehicle
+  const basePrice = Number(packageData.price || 0);
+  let hotelPrice = 0;
+  let vehiclePrice = 0;
+  try {
+    if (packageData.default_hotel_id) {
+      const h = await pool.query('SELECT price FROM hotels WHERE id = $1', [packageData.default_hotel_id]);
+      hotelPrice = Number(h.rows[0]?.price || 0);
+    }
+    if (packageData.default_vehicle_id) {
+      const v = await pool.query('SELECT price FROM vehicles WHERE id = $1', [packageData.default_vehicle_id]);
+      vehiclePrice = Number(v.rows[0]?.price || 0);
+    }
+  } catch {
+    hotelPrice = vehiclePrice = 0;
+  }
+  const totalPrice = basePrice + hotelPrice + vehiclePrice;
+  const price = pdfAmount(totalPrice);
+
+  page.drawText('Package:', { x: left + 12, y: boxTop - 20, size: 10, font, color: textDark });
+  page.drawText(pkgName, { x: left + 80, y: boxTop - 20, size: 11, font: fontBold, color: textDark });
+
+  page.drawText('Duration:', { x: left + 12, y: boxTop - 40, size: 10, font, color: textDark });
+  page.drawText(String(duration) + ' days', { x: left + 80, y: boxTop - 40, size: 10, font: fontBold, color: textDark });
+
+  page.drawText('Total price (package + hotel + vehicle):', { x: left + 12, y: boxTop - 60, size: 9.5, font, color: textDark });
+  page.drawText(price, { x: left + 12, y: boxTop - 76, size: 11, font: fontBold, color: textDark });
+
+  // Package hero image on the right half of info box if available
+  if (pkgImage) {
+    const imgMaxW = (right - left) / 2 - 20;
+    const imgMaxH = boxH - 24;
+    const fitScale = Math.min(imgMaxW / pkgImage.width, imgMaxH / pkgImage.height);
+    const imgW = pkgImage.width * fitScale;
+    const imgH = pkgImage.height * fitScale;
+    const imgX = right - imgW - 16;
+    const imgY = boxTop - 14 - imgH;
+    page.drawImage(pkgImage, {
+      x: imgX,
+      y: imgY,
+      width: imgW,
+      height: imgH,
+    });
+  }
+
+  // Optional package description block (multi-line)
+  let contentY = boxTop - boxH - 18;
+  const desc = asciiOnly(packageData.description || '');
+  if (desc) {
+    page.drawText('Description', { x: left, y: contentY, size: 11, font: fontBold, color: textDark });
+    contentY -= 12;
+    const descFontSize = 9.5;
+    const descLineH = 13;
+    const maxDescW = right - left;
+    const descWords = desc.split(' ');
+    let cur = '';
+    for (const w of descWords) {
+      const t = cur ? `${cur} ${w}` : w;
+      if (font.widthOfTextAtSize(t, descFontSize) <= maxDescW - 4) cur = t;
+      else {
+        page.drawText(cur, { x: left + 2, y: contentY, size: descFontSize, font, color: textDark });
+        contentY -= descLineH;
+        cur = w;
+      }
+    }
+    if (cur) {
+      page.drawText(cur, { x: left + 2, y: contentY, size: descFontSize, font, color: textDark });
+      contentY -= descLineH;
+    }
+    contentY -= 8;
+  }
+
+  // Day-wise itinerary title
+  page.drawText('Day-wise Itinerary', { x: left, y: contentY, size: 13, font: fontBold, color: textDark });
+  contentY -= 12;
+  page.drawLine({ start: { x: left, y: contentY }, end: { x: right, y: contentY }, thickness: 0.8, color: boxBorder });
+  contentY -= 12;
+
+  // Draw each day with word-wrapped bullet lines
+  const maxWidth = right - left;
+  const dayFontSize = 10;
+  const dayLineH = 13;
+  const wrap = (text) => {
+    const words = asciiOnly(text || '').split(' ');
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+      const t = cur ? `${cur} ${w}` : w;
+      if (font.widthOfTextAtSize(t, dayFontSize) <= maxWidth - 20) cur = t;
+      else {
+        if (cur) lines.push(cur);
+        cur = w;
+      }
+    }
+    if (cur) lines.push(cur);
+    return lines;
   };
 
-  doc.getPages()[0].drawText('Travel Itinerary', { x: margin, y, size: 22, font: fontBold, color: rgb(0.1, 0.2, 0.5) });
-  y -= 28;
-  drawText(`Package: ${packageData.name || packageData.title}`, 14, true);
-  drawText(`Duration: ${packageData.duration_days || packageData.days || 0} days`);
-  drawText(`Price: ₹${Number(packageData.price || 0).toLocaleString()}`);
-  y -= 10;
+  const sortedDays = [...days].sort((a, b) => (a.day_number || 0) - (b.day_number || 0));
+  for (const d of sortedDays) {
+    if (contentY < 80) break; // simple guard; most itineraries will fit one page
+    const title = `Day ${d.day_number || ''}`.trim();
+    page.drawText(title, { x: left, y: contentY, size: 11, font: fontBold, color: textDark });
+    contentY -= dayLineH;
 
-  if (days && days.length) {
-    drawText('Day-wise Itinerary', 14, true);
-    y -= 8;
-    for (const d of days.sort((a, b) => a.day_number - b.day_number)) {
-      drawText(`Day ${d.day_number}`, 12, true);
-      if (d.activities) drawText(`  Activities: ${d.activities}`);
-      if (d.hotel_id) drawText(`  Hotel: ${d.hotel_id}`);
-      if (d.meals) drawText(`  Meals: ${d.meals}`);
-      if (d.transport) drawText(`  Transport: ${d.transport}`);
-      if (d.notes) drawText(`  Notes: ${d.notes}`);
-      y -= 4;
+    const lines = [];
+    if (d.activities) lines.push(`Activities: ${d.activities}`);
+    if (d.hotel_id) lines.push(`Hotel: ${d.hotel_id}`);
+    if (d.meals) lines.push(`Meals: ${d.meals}`);
+    if (d.transport) lines.push(`Transport: ${d.transport}`);
+
+    // Bulleted detail lines (Activities/Hotel/Meals/Transport)
+    for (const ln of lines) {
+      const wrapped = wrap(ln);
+      wrapped.forEach((wl) => {
+        if (contentY < 80) return;
+        page.drawText(`• ${wl}`, { x: left + 10, y: contentY, size: dayFontSize, font, color: textDark });
+        contentY -= dayLineH;
+      });
     }
+
+    // Notes: paragraph style (no bullet, no \"Notes:\" label)
+    if (d.notes) {
+      const wrappedNotes = wrap(d.notes);
+      wrappedNotes.forEach((wl) => {
+        if (contentY < 80) return;
+        page.drawText(wl, { x: left + 10, y: contentY, size: dayFontSize, font, color: textDark });
+        contentY -= dayLineH;
+      });
+    }
+    contentY -= 6;
   }
 
   const pdfBytes = await doc.save();

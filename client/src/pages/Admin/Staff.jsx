@@ -187,11 +187,38 @@ export default function Staff() {
         </div>
       )}
 
-      <Modal open={modal.open} onClose={() => setModal({ open: false, data: null })} title={modal.data ? 'Edit Staff' : 'Add Staff'}>
+      <Modal
+        open={modal.open}
+        onClose={() => setModal({ open: false, data: null })}
+        title={modal.data ? 'Edit Staff' : 'Add Staff'}
+        size="lg"
+      >
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Input label="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          <Input label="Email *" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required disabled={!!modal.data} />
-          {!modal.data && <Input label="Password *" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="Name *"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+            />
+            <Input
+              label="Email *"
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              required
+              disabled={!!modal.data}
+            />
+          </div>
+          {!modal.data && (
+            <Input
+              label="Password *"
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              required
+            />
+          )}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Branch</label>
             <select
@@ -205,9 +232,18 @@ export default function Staff() {
               <option value="Rajkot">Rajkot</option>
             </select>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setModal({ open: false, data: null })}>Cancel</Button>
-            <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+          <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setModal({ open: false, data: null })}
+              className="w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving} className="w-full sm:w-auto">
+              {saving ? 'Saving...' : 'Save'}
+            </Button>
           </div>
         </form>
       </Modal>

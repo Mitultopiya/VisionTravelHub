@@ -45,6 +45,7 @@ export async function initDb() {
         name VARCHAR(255) NOT NULL,
         relation VARCHAR(100),
         age INTEGER,
+        mobile VARCHAR(50),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )`,
       `CREATE TABLE IF NOT EXISTS cities (
@@ -92,6 +93,11 @@ export async function initDb() {
     for (const sql of tables) {
       await client.query(sql);
     }
+
+    // Customer family: add mobile on older databases
+    await client.query(`
+      ALTER TABLE customer_family ADD COLUMN IF NOT EXISTS mobile VARCHAR(50);
+    `).catch(() => {});
 
     // Hotels: ensure new columns exist on older databases
     await client.query(`

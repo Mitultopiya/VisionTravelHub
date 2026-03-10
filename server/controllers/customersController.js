@@ -83,11 +83,11 @@ export const remove = async (req, res) => {
 export const addFamily = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, relation, age } = req.body;
+    const { name, relation, mobile } = req.body;
     if (!name) return res.status(400).json({ message: 'Family member name is required.' });
     const result = await pool.query(
-      'INSERT INTO customer_family (customer_id, name, relation, age) VALUES ($1, $2, $3, $4) RETURNING *',
-      [id, name, relation || null, age || null]
+      'INSERT INTO customer_family (customer_id, name, relation, mobile) VALUES ($1, $2, $3, $4) RETURNING *',
+      [id, name, relation || null, mobile || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -102,6 +102,28 @@ export const removeFamily = async (req, res) => {
     const result = await pool.query('DELETE FROM customer_family WHERE id = $1 AND customer_id = $2 RETURNING id', [fid, id]);
     if (result.rowCount === 0) return res.status(404).json({ message: 'Not found.' });
     res.json({ message: 'Deleted.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// Replace all family members for a customer with the provided array
+export const setFamily = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { members } = req.body;
+    const rows = Array.isArray(members) ? members : [];
+    await pool.query('DELETE FROM customer_family WHERE customer_id = $1', [id]);
+    for (const m of rows) {
+      if (!m.name || !m.name.trim()) continue;
+      await pool.query(
+        'INSERT INTO customer_family (customer_id, name, relation, mobile) VALUES ($1, $2, $3, $4)',
+        [id, m.name.trim(), m.relation || null, m.mobile || null]
+      );
+    }
+    const family = await pool.query('SELECT * FROM customer_family WHERE customer_id = $1 ORDER BY id', [id]);
+    res.json(family.rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error.' });

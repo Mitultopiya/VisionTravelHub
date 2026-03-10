@@ -32,6 +32,7 @@ export default function Quotations() {
     hotel_id: '',
     vehicle_id: '',
     valid_until: '',
+    family_count: '1',
     discount: '0',
     tax_percent: '0',
     terms_text: '',
@@ -81,6 +82,7 @@ export default function Quotations() {
       hotel_id: '',
       vehicle_id: '',
       valid_until: '',
+      family_count: '1',
       discount: '0',
       tax_percent: '0',
       terms_text: '',
@@ -101,6 +103,7 @@ export default function Quotations() {
           hotel_id: '',
           vehicle_id: '',
           valid_until: q.valid_until ? String(q.valid_until).slice(0, 10) : '',
+          family_count: '1',
           discount: q.discount != null ? String(q.discount) : '0',
           tax_percent: q.tax_percent != null ? String(q.tax_percent) : '0',
           terms_text: q.terms_text || '',
@@ -140,7 +143,9 @@ export default function Quotations() {
     return qty * price;
   };
 
-  const subtotal = form.items.reduce((sum, it) => sum + rowTotal(it), 0);
+  const persons = Number(form.family_count) || 1;
+  const itemsSubtotal = form.items.reduce((sum, it) => sum + rowTotal(it), 0);
+  const subtotal = itemsSubtotal * persons;
   const discountValue = Number(form.discount) || 0; // flat for now
   const taxableBase = Math.max(subtotal - discountValue, 0);
   const taxRate = Number(form.tax_percent) || 0;
@@ -256,10 +261,11 @@ export default function Quotations() {
   const handleCreate = (e) => {
     e.preventDefault();
     if (!form.customer_id) { toast('Select customer', 'error'); return; }
+    const people = Number(form.family_count) || 1;
     const items = form.items
       .filter((i) => i.item || i.description || i.qty || i.price)
       .map((i) => {
-        const total = rowTotal(i);
+        const total = rowTotal(i) * people;
         const label = i.item || 'Item';
         const desc = i.description ? `${label} - ${i.description}` : label;
         return {
@@ -391,8 +397,8 @@ export default function Quotations() {
           {/* Section A – Basic Information */}
           <Card>
             <h3 className="text-sm font-semibold text-slate-700 mb-3">Basic Information</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Customer *</label>
                 <select
                   value={form.customer_id}
@@ -408,12 +414,21 @@ export default function Quotations() {
                   ))}
                 </select>
               </div>
-              <Input
-                label="Valid Until"
-                type="date"
-                value={form.valid_until}
-                onChange={(e) => setForm({ ...form, valid_until: e.target.value })}
-              />
+              <div className="space-y-2">
+                <Input
+                  label="Valid Until"
+                  type="date"
+                  value={form.valid_until}
+                  onChange={(e) => setForm({ ...form, valid_until: e.target.value })}
+                />
+                <Input
+                  label="Family count (persons)"
+                  type="number"
+                  min="1"
+                  value={form.family_count}
+                  onChange={(e) => setForm({ ...form, family_count: e.target.value })}
+                />
+              </div>
             </div>
           </Card>
 
@@ -565,7 +580,14 @@ export default function Quotations() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-600">Subtotal</span>
+                  <span className="text-slate-600">
+                    Subtotal
+                    {persons > 1 && (
+                      <span className="text-xs text-slate-500 ml-1">
+                        ({persons} persons)
+                      </span>
+                    )}
+                  </span>
                   <span className="font-semibold text-slate-800">₹{subtotal.toLocaleString()}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">

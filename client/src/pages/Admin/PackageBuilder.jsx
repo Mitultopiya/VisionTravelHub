@@ -161,6 +161,14 @@ export default function PackageBuilder() {
   const removeDay = (i) =>
     setDays((prev) => prev.filter((_, j) => j !== i).map((d, j) => ({ ...d, day_number: j + 1 })));
 
+  // Pricing summary (base + default hotel + default vehicle)
+  const basePrice = Number(form.price || 0);
+  const selectedHotel = hotels.find((h) => String(h.id) === String(form.default_hotel_id));
+  const hotelPrice = Number(selectedHotel?.price || 0);
+  const selectedVehicle = vehicles.find((v) => String(v.id) === String(form.default_vehicle_id));
+  const vehiclePrice = Number(selectedVehicle?.price || 0);
+  const mergedTotal = basePrice + hotelPrice + vehiclePrice;
+
   if (loading) return <Loading />;
 
   return (
@@ -192,7 +200,7 @@ export default function PackageBuilder() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
-                label="Price (₹) *"
+                label="Base package price (₹) *"
                 type="number"
                 min="0"
                 value={form.price}
@@ -272,6 +280,32 @@ export default function PackageBuilder() {
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+            <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs sm:text-sm space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Base package price</span>
+                <span className="font-semibold text-slate-800">
+                  ₹{basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Default hotel price</span>
+                <span className="font-semibold text-slate-800">
+                  ₹{hotelPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Default vehicle price</span>
+                <span className="font-semibold text-slate-800">
+                  ₹{vehiclePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="border-t border-slate-200 pt-1.5 flex items-center justify-between">
+                <span className="font-semibold text-slate-700">Total (package + hotel + vehicle)</span>
+                <span className="text-base font-bold text-primary-600">
+                  ₹{mergedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
               </div>
             </div>
             <div className="flex gap-2 pt-2">

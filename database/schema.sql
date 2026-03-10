@@ -42,8 +42,11 @@ CREATE TABLE IF NOT EXISTS customer_family (
   name VARCHAR(255) NOT NULL,
   relation VARCHAR(100),
   age INTEGER,
+  mobile VARCHAR(50),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE customer_family ADD COLUMN IF NOT EXISTS mobile VARCHAR(50);
 
 CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
 CREATE INDEX IF NOT EXISTS idx_customers_mobile ON customers(mobile);

@@ -13,5 +13,6 @@ router.put('/:id', c.update);
 router.delete('/:id', c.remove);
 router.post('/:id/family', c.addFamily);
 router.delete('/:id/family/:fid', c.removeFamily);
+router.put('/:id/family', c.setFamily);
 
 export default router;

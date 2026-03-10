@@ -44,6 +44,7 @@ export const updateCustomer = (id, data) => api.put(`/customers/${id}`, data);
 export const deleteCustomer = (id) => api.delete(`/customers/${id}`);
 export const addCustomerFamily = (id, data) => api.post(`/customers/${id}/family`, data);
 export const removeCustomerFamily = (id, fid) => api.delete(`/customers/${id}/family/${fid}`);
+export const setCustomerFamily = (id, members) => api.put(`/customers/${id}/family`, { members });
 
 // Masters
 export const getCities = () => api.get('/masters/cities');

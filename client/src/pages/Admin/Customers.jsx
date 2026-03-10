@@ -7,6 +7,7 @@ import {
   deleteCustomer,
   addCustomerFamily,
   removeCustomerFamily,
+  setCustomerFamily,
 } from '../../services/api';
 import Loading from '../../components/Loading';
 import Card from '../../components/ui/Card';
@@ -27,7 +28,8 @@ export default function Customers() {
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState(emptyCustomer);
   const [saving, setSaving] = useState(false);
-  const [familyForm, setFamilyForm] = useState({ name: '', relation: '', age: '' });
+  const [familyForm, setFamilyForm] = useState({ name: '', relation: '', mobile: '' });
+  const [familyRows, setFamilyRows] = useState([]);
 
   const load = () => {
     setLoading(true);
@@ -45,34 +47,119 @@ export default function Customers() {
 
   const openAdd = () => {
     setForm(emptyCustomer);
+    setFamilyRows([]);
     setModal({ open: true, mode: 'add', data: null });
   };
 
   const openEdit = (row) => {
-    setForm({
-      name: row.name || '',
-      mobile: row.mobile || '',
-      email: row.email || '',
-      address: row.address || '',
-      passport: row.passport || '',
-      family_count: row.family_count ?? 0,
-      notes: row.notes || '',
-    });
-    setModal({ open: true, mode: 'edit', data: row });
+    getCustomer(row.id)
+      .then((r) => {
+        const c = r.data;
+        setForm({
+          name: c.name || '',
+          mobile: c.mobile || '',
+          email: c.email || '',
+          address: c.address || '',
+          passport: c.passport || '',
+          family_count: c.family_count ?? (Array.isArray(c.family) ? c.family.length : 0),
+          notes: c.notes || '',
+        });
+        const fam = Array.isArray(c.family)
+          ? c.family.map((f) => ({ name: f.name || '', relation: f.relation || '', mobile: f.mobile || '' }))
+          : [];
+        setFamilyRows(fam);
+        setModal({ open: true, mode: 'edit', data: c });
+      })
+      .catch(() => {
+        setForm({
+          name: row.name || '',
+          mobile: row.mobile || '',
+          email: row.email || '',
+          address: row.address || '',
+          passport: row.passport || '',
+          family_count: row.family_count ?? 0,
+          notes: row.notes || '',
+        });
+        setFamilyRows([]);
+        setModal({ open: true, mode: 'edit', data: row });
+      });
   };
 
   const openDetail = (row) => {
     getCustomer(row.id).then((r) => setDetail(r.data)).catch(() => toast('Failed to load customer', 'error'));
   };
 
+  const handleFamilyCountChange = (value) => {
+    const count = Math.max(0, Number(value) || 0);
+    setForm((prev) => ({ ...prev, family_count: value }));
+    setFamilyRows((prev) => {
+      const next = [...prev];
+      if (count > next.length) {
+        for (let i = next.length; i < count; i += 1) {
+          next.push({ name: '', relation: '', mobile: '' });
+        }
+      } else if (count < next.length) {
+        next.length = count;
+      }
+      return next;
+    });
+  };
+
+  const updateFamilyRow = (index, field, value) => {
+    setFamilyRows((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     setSaving(true);
     const payload = { ...form, family_count: Number(form.family_count) || 0 };
-    (modal.mode === 'add' ? createCustomer(payload) : updateCustomer(modal.data.id, payload))
-      .then(() => {
-        toast(modal.mode === 'add' ? 'Customer created' : 'Customer updated');
+    if (modal.mode === 'add') {
+      createCustomer(payload)
+        .then(async (res) => {
+          const created = res.data;
+          const rowsToSave = (familyRows || []).filter((r) => r.name && r.name.trim());
+          if (created?.id && rowsToSave.length) {
+            await Promise.all(
+              rowsToSave.map((r) =>
+                    addCustomerFamily(created.id, {
+                      name: r.name.trim(),
+                      relation: r.relation || '',
+                      mobile: r.mobile || '',
+                    }).catch(() => {})
+              )
+            );
+          }
+          toast('Customer created');
+          setModal({ open: false, mode: 'add', data: null });
+          setFamilyRows([]);
+          load();
+        })
+        .catch((err) => toast(err.response?.data?.message || 'Failed', 'error'))
+        .finally(() => setSaving(false));
+      return;
+    }
+
+    updateCustomer(modal.data.id, payload)
+      .then(async () => {
+        const rowsToSave = (familyRows || []).filter((r) => r.name && r.name.trim());
+        if (rowsToSave.length) {
+          await Promise.all(
+            rowsToSave.map((r) =>
+              addCustomerFamily(modal.data.id, {
+                name: r.name.trim(),
+                relation: r.relation || '',
+                mobile: r.mobile || '',
+              }).catch(() => {})
+            )
+          );
+        }
+        toast('Customer updated');
         setModal({ open: false, mode: 'add', data: null });
+        setFamilyRows([]);
         load();
         if (detail?.id === modal.data?.id) getCustomer(modal.data.id).then((r) => setDetail(r.data));
       })
@@ -93,7 +180,7 @@ export default function Customers() {
     addCustomerFamily(detail.id, familyForm)
       .then(() => {
         toast('Family member added');
-        setFamilyForm({ name: '', relation: '', age: '' });
+        setFamilyForm({ name: '', relation: '', mobile: '' });
         getCustomer(detail.id).then((r) => setDetail(r.data));
       })
       .catch(() => toast('Failed', 'error'));
@@ -179,7 +266,61 @@ export default function Customers() {
           <Input label="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input label="Passport" value={form.passport} onChange={(e) => setForm({ ...form, passport: e.target.value })} />
-            <Input label="Family count" type="number" min="0" value={form.family_count} onChange={(e) => setForm({ ...form, family_count: e.target.value })} />
+            <Input
+              label="Family count"
+              type="number"
+              min="0"
+              value={form.family_count}
+              onChange={(e) => handleFamilyCountChange(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-500">Family members (name, relation, mobile)</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  setFamilyRows((prev) => [...prev, { name: '', relation: '', mobile: '' }])
+                }
+              >
+                + Add Member
+              </Button>
+            </div>
+            {familyRows.length > 0 && (
+              <div className="space-y-2">
+                {familyRows.map((row, idx) => (
+                  <div key={idx} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+                    <Input
+                      label={`Member ${idx + 1} name`}
+                      value={row.name}
+                      onChange={(e) => updateFamilyRow(idx, 'name', e.target.value)}
+                    />
+                    <Input
+                      label="Relation"
+                      value={row.relation}
+                      onChange={(e) => updateFamilyRow(idx, 'relation', e.target.value)}
+                    />
+                    <Input
+                      label="Mobile"
+                      value={row.mobile}
+                      onChange={(e) => updateFamilyRow(idx, 'mobile', e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        setFamilyRows((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
@@ -208,17 +349,21 @@ export default function Customers() {
               <Button size="sm" variant="secondary" onClick={() => { setModal({ open: true, mode: 'edit', data: detail }); setDetail(null); }}>Edit Customer</Button>
             </div>
             <hr />
-            <h4 className="font-medium text-slate-800">Family Members</h4>
-            <form onSubmit={handleAddFamily} className="flex flex-wrap gap-2 items-end">
-              <Input placeholder="Name" value={familyForm.name} onChange={(e) => setFamilyForm({ ...familyForm, name: e.target.value })} className="flex-1 min-w-[120px]" />
-              <Input placeholder="Relation" value={familyForm.relation} onChange={(e) => setFamilyForm({ ...familyForm, relation: e.target.value })} className="w-28" />
-              <Input placeholder="Age" type="number" value={familyForm.age} onChange={(e) => setFamilyForm({ ...familyForm, age: e.target.value })} className="w-20" />
-              <Button type="submit" size="sm">Add</Button>
-            </form>
-            <ul className="space-y-2">
+            <h4 className="font-medium text-slate-800 mb-1">Family Members</h4>
+            <ul className="space-y-2 mt-1">
               {(detail.family || []).map((f) => (
                 <li key={f.id} className="flex justify-between items-center py-2 border-b border-slate-100 text-sm">
-                  <span>{f.name} {f.relation && `(${f.relation})`} {f.age && `- ${f.age} yrs`}</span>
+                  <div>
+                    <p className="font-medium text-slate-800">
+                      {f.name}
+                      {f.relation && ` (${f.relation})`}
+                    </p>
+                    {f.mobile && (
+                      <p className="text-xs text-slate-500">
+                        Mobile: {f.mobile}
+                      </p>
+                    )}
+                  </div>
                   <Button size="sm" variant="ghost" onClick={() => handleRemoveFamily(f.id)}>Remove</Button>
                 </li>
               ))}
