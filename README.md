@@ -8,7 +8,7 @@ Full-stack ERP-style travel agency application with CRM, package builder, quotat
 
 - **Frontend:** React, Vite, Tailwind CSS, React Router, Axios, React Icons, Recharts
 - **Backend:** Node.js, Express.js, PostgreSQL, JWT, bcrypt, Multer, pdf-lib
-- **Roles:** Admin, Manager, Staff (login only; no signup; admin creates users)
+- **Roles:** Super Admin, Admin, Branch Admin, Manager, Staff (login only; no signup; admin creates users)
 
 ---
 
@@ -74,8 +74,9 @@ Open http://localhost:5173.
 ## Core Modules & Features
 
 ### 1. Dashboard
-- Total customers, revenue, collected amount, pending payments
-- Charts and KPIs (optional; see Reports for full analytics)
+- Branch selector (Ahmedabad, Baroda, Junagadh, Rajkot, etc.) at the top. The selected branch is remembered and applied across Dashboard, Settings, Customers, Invoices, Payment Slips, Master data, Staff, and Reports.
+- Summary cards: **Total Customers**, **Total Revenue**, **Pending Payments**, **Completed Payments** (per branch)
+- Payments Overview bar chart (Paid vs Pending invoices) and other analytics
 
 ### 2. Customer CRM
 - Add / Edit / View customers (name, mobile, email, address, passport, family count, notes)
@@ -89,10 +90,10 @@ Open http://localhost:5173.
 - Package deletion: bookings/quotations `package_id` set to NULL before delete
 
 ### 4. Master Data (Preferred Items)
-- **Cities** – CRUD
-- **Hotels** – CRUD with **room type**, **price**, **city**
-- **Vehicles** – CRUD with **price**, **city**
-- **Activities** – CRUD with **image upload**
+- **Cities** – CRUD, **branch-specific** (only visible/usable in the selected branch)
+- **Hotels** – CRUD with **room type**, **price**, **city**, **branch-specific**
+- **Vehicles** – CRUD with **price**, **city**, **branch-specific**
+- **Activities** – CRUD with **image upload**, **branch-specific**
 - Guides removed from scope
 
 ### 5. Booking Management
@@ -119,19 +120,23 @@ Open http://localhost:5173.
 - Reference column removed from list and receipt
 - Company details and GST from **Company Settings** (live)
 
-### 9. Company Settings (Admin)
+### 9. Company Settings & Branch Settings (Admin)
 - **Company information:** name, address, phone, email, GST, website
 - **Bank details:** bank name, account number, IFSC, UPI, branch
-- Stored in `company_settings`; used in **all PDFs** (quotation, invoice, payment slip) and receipt print
-- Editable anytime; no code change needed for branding
+- **Payment Settings:** UPI Name, UPI ID, **UPI QR Code upload** (image stored in `/uploads/payment`), used in invoice/payment-slip PDFs
+- **Branch Management:** create/edit/delete branches (Name, Code, Address, City, State, Phone, Email, Manager Name, GST Number)
+- Settings are **branch-aware**: choose a branch in Settings and only that branch’s overrides (bank/UPI/QR) are edited; global defaults remain in `company_settings`.
+- All settings are used in **all PDFs** (quotation, invoice, payment slip) and receipt print.
 
 ### 10. Staff Management
-- Add staff: name, email, password, **branch** (Ahmedabad, Junagadh, Baroda, Rajkot); role is **staff only** (no role dropdown)
+- Add staff: name, email, password, **assigned branch** (selected from real branches); role is **staff** (no role dropdown)
+- Staff listing filtered by current branch; staff login is scoped to their assigned `branch_id` (branch admins/staff only see their branch’s data)
 - List: Name, Email, Branch, Status, Actions (Edit, **Reset Password**, Block, Delete)
 - **Reset Password:** admin-only; modal to set new password for selected staff
 - Delete staff supported (API fixed for 404)
 
 ### 11. Reports & Analytics
+- All reports respect the **selected branch** (branch-aware dashboard data).
 - **Overview:** KPI cards (customers, revenue, collected, pending); invoice status pills; **monthly revenue chart** (last 6 months); **donut charts** (collections by mode, invoice status); quotation stats
 - **Revenue:** date filter; bar chart; revenue table with totals
 - **Pending Payments:** summary cards; bar chart (due vs collected); table with overdue badges, progress, totals
@@ -143,14 +148,16 @@ Open http://localhost:5173.
 
 ### 13. PDFs
 - **Quotation PDF** – company logo, quote no., dates, **Prepared by**, customer, items, T&C (full text, word-wrapped), summary, bank details
-- **Invoice PDF** – same style; invoice no., GST, bank details; no blank item rows
-- **Payment slip PDF** – receipt layout; company + GST; amount received; optional second page for more T&C
+- **Invoice PDF** – same style; invoice no., GST, **combined Bank & UPI box with QR image**, no blank item rows
+- **Payment slip PDF** – receipt layout; company + GST; amount received; UPI QR + payment card
 
 ---
 
 ## Role Permissions
 
-- **Admin:** Full access; user management; company settings; staff reset password
+- **Super Admin:** All branches, all features
+- **Admin:** All branches, user management, company & branch settings; staff reset password
+- **Branch Admin:** Access **only their branch**; manage staff and data within that branch
 - **Manager:** Customers, packages, bookings, quotations, invoices, payment slips, reports, staff (no delete staff)
 - **Staff:** View assigned bookings, update status, add notes (no master data, no settings)
 

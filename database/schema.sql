@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS cities (
   id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   country VARCHAR(255) DEFAULT 'India',
+  branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -93,12 +94,14 @@ CREATE TABLE IF NOT EXISTS hotels (
   contact VARCHAR(100),
   room_type VARCHAR(100),
   price DECIMAL(12,2),
+  branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Ensure columns exist (for existing DBs)
 ALTER TABLE hotels ADD COLUMN IF NOT EXISTS room_type VARCHAR(100);
 ALTER TABLE hotels ADD COLUMN IF NOT EXISTS price DECIMAL(12,2);
+ALTER TABLE hotels ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS vehicles (
   id SERIAL PRIMARY KEY,
@@ -107,11 +110,13 @@ CREATE TABLE IF NOT EXISTS vehicles (
   capacity INTEGER,
   price DECIMAL(12,2),
   city_id INTEGER REFERENCES cities(id) ON DELETE SET NULL,
+  branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS city_id INTEGER REFERENCES cities(id);
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS price DECIMAL(12,2);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS activities (
   id SERIAL PRIMARY KEY,
@@ -119,10 +124,12 @@ CREATE TABLE IF NOT EXISTS activities (
   description TEXT,
   city_id INTEGER REFERENCES cities(id) ON DELETE SET NULL,
   image_url VARCHAR(500),
+  branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 ALTER TABLE activities ADD COLUMN IF NOT EXISTS image_url VARCHAR(500);
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS guides (
   id SERIAL PRIMARY KEY,
@@ -184,7 +191,7 @@ CREATE INDEX IF NOT EXISTS idx_package_days_package ON package_days(package_id);
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS bookings (
   id SERIAL PRIMARY KEY,
-  customer_id INTEGER REFERENCES customers(id) ON DELETE RESTRICT,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
   package_id INTEGER REFERENCES packages(id) ON DELETE SET NULL,
   travel_start_date DATE,
   travel_end_date DATE,
@@ -291,7 +298,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   id SERIAL PRIMARY KEY,
   invoice_number VARCHAR(50) UNIQUE NOT NULL,
   booking_id INTEGER REFERENCES bookings(id) ON DELETE SET NULL,
-  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
   invoice_date DATE NOT NULL,
   due_date DATE NOT NULL,
   subtotal DECIMAL(12,2) DEFAULT 0,
@@ -318,6 +325,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   vehicle_type VARCHAR(100),
   terms_text TEXT,
   company_gst VARCHAR(50),
+  branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -392,7 +400,9 @@ INSERT INTO company_settings (key, value) VALUES
   ('bank_account',    '000000000000'),
   ('bank_ifsc',       'BANK0000000'),
   ('bank_upi',        'yourcompany@upi'),
-  ('bank_branch',     'Main Branch')
+  ('bank_branch',     'Main Branch'),
+  ('upi_name',        ''),
+  ('upi_qr_path',     '')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS activity_logs (
