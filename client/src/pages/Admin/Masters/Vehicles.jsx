@@ -6,6 +6,11 @@ import Input from '../../../components/ui/Input';
 import Modal from '../../../components/ui/Modal';
 import { useToast } from '../../../context/ToastContext';
 
+const getSelectedBranchId = () => {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('vth_selected_branch_id') || '';
+};
+
 export default function Vehicles() {
   const { toast } = useToast();
   const [list, setList] = useState([]);
@@ -17,7 +22,9 @@ export default function Vehicles() {
 
   const load = () => {
     setLoading(true);
-    Promise.all([getVehicles(), getCities()])
+    const branchId = getSelectedBranchId();
+    const params = branchId ? { branch_id: branchId } : undefined;
+    Promise.all([getVehicles(params), getCities(params)])
       .then(([v, c]) => {
         setList(v.data || []);
         setCities(c.data || []);
@@ -44,11 +51,13 @@ export default function Vehicles() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setSaving(true);
+    const branchId = getSelectedBranchId();
     const payload = {
       ...form,
       capacity: form.capacity ? Number(form.capacity) : null,
       price: form.price ? Number(form.price) : null,
       city_id: form.city_id ? Number(form.city_id) : null,
+      ...(branchId ? { branch_id: Number(branchId) } : {}),
     };
     (modal.data ? updateVehicle(modal.data.id, payload) : createVehicle(payload))
       .then(() => { toast(modal.data ? 'Vehicle updated' : 'Vehicle added'); setModal({ open: false, data: null }); load(); })

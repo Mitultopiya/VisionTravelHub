@@ -47,19 +47,19 @@ export const removeCustomerFamily = (id, fid) => api.delete(`/customers/${id}/fa
 export const setCustomerFamily = (id, members) => api.put(`/customers/${id}/family`, { members });
 
 // Masters
-export const getCities = () => api.get('/masters/cities');
+export const getCities = (params) => api.get('/masters/cities', { params });
 export const createCity = (data) => api.post('/masters/cities', data);
 export const updateCity = (id, data) => api.put(`/masters/cities/${id}`, data);
 export const deleteCity = (id) => api.delete(`/masters/cities/${id}`);
-export const getHotels = () => api.get('/masters/hotels');
+export const getHotels = (params) => api.get('/masters/hotels', { params });
 export const createHotel = (data) => api.post('/masters/hotels', data);
 export const updateHotel = (id, data) => api.put(`/masters/hotels/${id}`, data);
 export const deleteHotel = (id) => api.delete(`/masters/hotels/${id}`);
-export const getVehicles = () => api.get('/masters/vehicles');
+export const getVehicles = (params) => api.get('/masters/vehicles', { params });
 export const createVehicle = (data) => api.post('/masters/vehicles', data);
 export const updateVehicle = (id, data) => api.put(`/masters/vehicles/${id}`, data);
 export const deleteVehicle = (id) => api.delete(`/masters/vehicles/${id}`);
-export const getActivities = () => api.get('/masters/activities');
+export const getActivities = (params) => api.get('/masters/activities', { params });
 export const createActivity = (data) => api.post('/masters/activities', data);
 export const updateActivity = (id, data) => api.put(`/masters/activities/${id}`, data);
 export const deleteActivity = (id) => api.delete(`/masters/activities/${id}`);
@@ -97,14 +97,14 @@ export const deleteQuotation = (id) => api.delete(`/quotations/${id}`);
 export const convertQuotationToBooking = (id) => api.post(`/quotations/${id}/convert-booking`);
 
 // Invoices (standalone invoice module)
-export const getInvoices = () => api.get('/invoices');
+export const getInvoices = (params) => api.get('/invoices', { params });
 export const getInvoice = (id) => api.get(`/invoices/${id}`);
 export const getNextInvoiceNumber = () => api.get('/invoices/next-number');
 export const createInvoice = (data) => api.post('/invoices', data);
 export const updateInvoice = (id, data) => api.put(`/invoices/${id}`, data);
 export const deleteInvoice = (id) => api.delete(`/invoices/${id}`);
 export const addInvoicePayment = (id, data) => api.post(`/invoices/${id}/payments`, data);
-export const getAllInvoicePayments = () => api.get('/invoices/all-payments');
+export const getAllInvoicePayments = (params) => api.get('/invoices/all-payments', { params });
 export const deleteInvoicePayment = (invoiceId, paymentId) => api.delete(`/invoices/${invoiceId}/payments/${paymentId}`);
 
 // Payments
@@ -118,7 +118,7 @@ export const addDocument = (formData) => api.post('/documents', formData, { head
 export const deleteDocument = (id) => api.delete(`/documents/${id}`);
 
 // Staff
-export const getStaff = () => api.get('/staff');
+export const getStaff = (params) => api.get('/staff', { params });
 export const createStaff = (data) => api.post('/staff', data);
 export const updateStaff = (id, data) => api.put(`/staff/${id}`, data);
 export const toggleBlockStaff = (id, is_blocked) => api.patch(`/staff/${id}/block`, { is_blocked });
@@ -126,12 +126,20 @@ export const resetStaffPassword = (id, new_password) => api.patch(`/staff/${id}/
 export const deleteStaff = (id) => api.delete(`/staff/${id}`);
 export const getStaffPerformance = (id) => api.get(`/staff/${id}/performance`);
 
+// Branches
+export const getBranches = () => api.get('/branches');
+export const getBranch = (id) => api.get(`/branches/${id}`);
+export const createBranch = (data) => api.post('/branches', data);
+export const updateBranch = (id, data) => api.put(`/branches/${id}`, data);
+export const deleteBranch = (id) => api.delete(`/branches/${id}`);
+
 // Reports
-export const getDashboard = () => api.get('/reports/dashboard');
+export const getDashboard = (params) => api.get('/reports/dashboard', { params });
 export const getRevenueReport = (params) => api.get('/reports/revenue', { params });
-export const getRevenueReportFiltered = (start, end) => api.get('/reports/revenue', { params: { start, end } });
-export const getPendingPayments = () => api.get('/reports/pending-payments');
-export const getStaffPerformanceReport = () => api.get('/reports/staff-performance');
+export const getRevenueReportFiltered = (start, end, branchId) =>
+  api.get('/reports/revenue', { params: { start, end, branch_id: branchId } });
+export const getPendingPayments = (params) => api.get('/reports/pending-payments', { params });
+export const getStaffPerformanceReport = (params) => api.get('/reports/staff-performance', { params });
 
 // PDF
 export const downloadItinerary = (id) => api.get(`/pdf/itinerary/${id}`, { responseType: 'blob' });
@@ -141,7 +149,13 @@ export const downloadQuotationPdf = (id) => api.get(`/pdf/quotation/${id}`, { re
 export const downloadPaymentSlipPdf = (id) => api.get(`/pdf/payment-slip/${id}`, { responseType: 'blob' });
 
 // Company Settings
-export const getCompanySettings = () => api.get('/settings');
+export const getCompanySettings = (params = {}) => api.get('/settings', { params });
 export const updateCompanySettings = (data) => api.put('/settings', data);
+export const uploadPaymentQr = (file, branchId = null) => {
+  const form = new FormData();
+  form.append('file', file);
+  if (branchId != null) form.append('branch_id', String(branchId));
+  return api.post('/settings/upload-qr', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+};
 
 export default api;

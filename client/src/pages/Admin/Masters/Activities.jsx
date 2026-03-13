@@ -7,6 +7,11 @@ import Modal from '../../../components/ui/Modal';
 import FileUpload from '../../../components/FileUpload';
 import { useToast } from '../../../context/ToastContext';
 
+const getSelectedBranchId = () => {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('vth_selected_branch_id') || '';
+};
+
 export default function Activities() {
   const { toast } = useToast();
   const [list, setList] = useState([]);
@@ -19,7 +24,9 @@ export default function Activities() {
 
   const load = () => {
     setLoading(true);
-    Promise.all([getActivities(), getCities()]).then(([a, c]) => {
+    const branchId = getSelectedBranchId();
+    const params = branchId ? { branch_id: branchId } : undefined;
+    Promise.all([getActivities(params), getCities(params)]).then(([a, c]) => {
       setList(a.data || []);
       setCities(c.data || []);
     }).finally(() => setLoading(false));
@@ -45,7 +52,13 @@ export default function Activities() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setSaving(true);
-    const payload = { ...form, city_id: form.city_id ? Number(form.city_id) : null, image_url: form.image_url || null };
+    const branchId = getSelectedBranchId();
+    const payload = {
+      ...form,
+      city_id: form.city_id ? Number(form.city_id) : null,
+      image_url: form.image_url || null,
+      ...(branchId ? { branch_id: Number(branchId) } : {}),
+    };
     (modal.data ? updateActivity(modal.data.id, payload) : createActivity(payload))
       .then(() => { toast(modal.data ? 'Activity updated' : 'Activity added'); setModal({ open: false, data: null }); load(); })
       .catch((err) => toast(err.response?.data?.message || 'Failed', 'error'))

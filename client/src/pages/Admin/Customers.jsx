@@ -18,6 +18,11 @@ import { useToast } from '../../context/ToastContext';
 
 const emptyCustomer = { name: '', mobile: '', email: '', address: '', passport: '', family_count: 0, notes: '' };
 
+const getSelectedBranchId = () => {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('vth_selected_branch_id') || '';
+};
+
 export default function Customers() {
   const { toast } = useToast();
   const [list, setList] = useState({ data: [], total: 0 });
@@ -33,7 +38,10 @@ export default function Customers() {
 
   const load = () => {
     setLoading(true);
-    getCustomers({ page, limit: 10, search: search || undefined })
+    const branchId = getSelectedBranchId();
+    const params = { page, limit: 10, search: search || undefined };
+    if (branchId) params.branch_id = branchId;
+    getCustomers(params)
       .then((r) => setList({ data: r.data.data || [], total: r.data.total || 0 }))
       .catch(() => toast('Failed to load customers', 'error'))
       .finally(() => setLoading(false));

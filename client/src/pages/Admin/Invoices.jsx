@@ -11,6 +11,7 @@ import {
   getBookings,
   getPackages,
   getStaff,
+  getCompanySettings,
   downloadInvoicePdf,
 } from '../../services/api';
 import { getStoredUser } from '../../utils/auth';
@@ -19,6 +20,7 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Modal from '../../components/ui/Modal';
+import PaymentCard from '../../components/PaymentCard';
 import { useToast } from '../../context/ToastContext';
 
 const COMPANY = {
@@ -77,6 +79,7 @@ export default function Invoices() {
   const [staff, setStaff] = useState([]);
   const [nextNumber, setNextNumber] = useState('');
   const [saving, setSaving] = useState(false);
+  const [paymentSettings, setPaymentSettings] = useState({});
   const [form, setForm] = useState({
     invoice_number: '',
     invoice_date: new Date().toISOString().slice(0, 10),
@@ -107,9 +110,16 @@ export default function Invoices() {
     items: [emptyItem(), emptyItem()],
   });
 
+  const getSelectedBranchId = () => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('vth_selected_branch_id') || '';
+  };
+
   const load = () => {
     setLoading(true);
-    getInvoices().then((r) => setList(r.data || [])).finally(() => setLoading(false));
+    const branchId = getSelectedBranchId();
+    const params = branchId ? { branch_id: branchId } : undefined;
+    getInvoices(params).then((r) => setList(r.data || [])).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
   useEffect(() => {
@@ -117,6 +127,7 @@ export default function Invoices() {
     getBookings({ limit: 200 }).then((r) => setBookings(r.data?.data || r.data || [])).catch(() => {});
     getPackages().then((r) => setPackages(r.data || [])).catch(() => {});
     getStaff().then((r) => setStaff(r.data || [])).catch(() => {});
+    getCompanySettings().then((r) => setPaymentSettings(r.data || {})).catch(() => {});
   }, []);
 
   const openAdd = () => {
@@ -711,6 +722,7 @@ export default function Invoices() {
       {/* Record Payment Modal */}
       <Modal open={paymentModal.open} onClose={() => setPaymentModal({ open: false, invoiceId: null })} title="Record Payment" size="md">
         <form onSubmit={handleRecordPayment} className="space-y-4">
+          <PaymentCard settings={paymentSettings} className="mb-2" />
           <Input label="Amount *" type="number" min="0" step="0.01" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} required />
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Mode *</label>

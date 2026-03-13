@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getStaff, createStaff, updateStaff, toggleBlockStaff, deleteStaff, resetStaffPassword } from '../../services/api';
+import { getStaff, createStaff, updateStaff, toggleBlockStaff, deleteStaff, resetStaffPassword, getBranches } from '../../services/api';
 import Loading from '../../components/Loading';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
@@ -7,12 +7,18 @@ import Modal from '../../components/ui/Modal';
 import { useToast } from '../../context/ToastContext';
 import { RiLockPasswordLine } from 'react-icons/ri';
 
+const getSelectedBranchId = () => {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('vth_selected_branch_id') || '';
+};
+
 export default function Staff() {
   const { toast } = useToast();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, data: null });
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'staff', branch: 'Ahmedabad' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'staff', branch: 'Ahmedabad', branch_id: '' });
+  const [branches, setBranches] = useState([]);
   const [saving, setSaving] = useState(false);
   const [pwModal, setPwModal] = useState({ open: false, staff: null });
   const [newPw, setNewPw] = useState('');
@@ -21,12 +27,21 @@ export default function Staff() {
 
   const load = () => {
     setLoading(true);
-    getStaff().then((r) => setList(r.data || [])).finally(() => setLoading(false));
+    const branchId = getSelectedBranchId();
+    const params = branchId ? { branch_id: branchId } : undefined;
+    getStaff(params).then((r) => setList(r.data || [])).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
 
+  useEffect(() => {
+    getBranches().then((r) => setBranches(r.data || [])).catch(() => setBranches([]));
+  }, []);
+
   const openAdd = () => {
-    setForm({ name: '', email: '', password: '', role: 'staff', branch: 'Ahmedabad' });
+    const selectedId = getSelectedBranchId();
+    const defaultBranch = branches.find((b) => String(b.id) === selectedId) || branches[0] || null;
+    const branchLabel = defaultBranch ? defaultBranch.name : 'Ahmedabad';
+    setForm({ name: '', email: '', password: '', role: 'staff', branch: branchLabel, branch_id: defaultBranch?.id || '' });
     setModal({ open: true, data: null });
   };
   const openEdit = (row) => {
@@ -36,6 +51,7 @@ export default function Staff() {
       password: '',
       role: row.role || 'staff',
       branch: row.branch || 'Ahmedabad',
+      branch_id: row.branch_id || '',
     });
     setModal({ open: true, data: row });
   };
@@ -45,13 +61,13 @@ export default function Staff() {
     if (!form.name || !form.email) { toast('Name and email required', 'error'); return; }
     setSaving(true);
     if (modal.data) {
-      updateStaff(modal.data.id, { name: form.name, email: form.email, role: 'staff', branch: form.branch })
+      updateStaff(modal.data.id, { name: form.name, email: form.email, role: 'staff', branch: form.branch, branch_id: form.branch_id || null })
         .then(() => { toast('Staff updated'); setModal({ open: false, data: null }); load(); })
         .catch((err) => toast(err.response?.data?.message || 'Failed', 'error'))
         .finally(() => setSaving(false));
     } else {
       if (!form.password) { toast('Password required for new staff', 'error'); setSaving(false); return; }
-      createStaff(form)
+      createStaff({ ...form, branch_id: form.branch_id || null })
         .then(() => { toast('Staff added'); setModal({ open: false, data: null }); load(); })
         .catch((err) => toast(err.response?.data?.message || 'Failed', 'error'))
         .finally(() => setSaving(false));
@@ -222,14 +238,24 @@ export default function Staff() {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Branch</label>
             <select
-              value={form.branch}
-              onChange={(e) => setForm({ ...form, branch: e.target.value })}
+              value={form.branch_id}
+              onChange={(e) => {
+                const val = e.target.value;
+                const b = branches.find((br) => String(br.id) === val);
+                setForm((prev) => ({
+                  ...prev,
+                  branch_id: val,
+                  branch: b ? b.name : prev.branch,
+                }));
+              }}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             >
-              <option value="Ahmedabad">Ahmedabad</option>
-              <option value="Junagadh">Junagadh</option>
-              <option value="Baroda">Baroda</option>
-              <option value="Rajkot">Rajkot</option>
+              <option value="">Select branch</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({b.code})
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">

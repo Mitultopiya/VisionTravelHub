@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getAllInvoicePayments, deleteInvoicePayment, downloadPaymentSlipPdf, getCompanySettings } from '../../services/api';
 import Loading from '../../components/Loading';
+import PaymentCard from '../../components/PaymentCard';
 import { useToast } from '../../context/ToastContext';
 import {
   RiUserLine, RiMoneyRupeeCircleLine, RiFileList3Line,
@@ -268,6 +269,8 @@ function SlipModal({ payment, onClose, company = DEFAULT_COMPANY }) {
           ))}
           <div className="border-t border-slate-200 mt-2 mb-3" />
 
+          <PaymentCard settings={company} className="my-4" />
+
           <p className="text-center text-[9px] text-slate-400">Thank you for your payment. This is a computer-generated receipt and does not require a signature.</p>
         </div>
       </div>
@@ -408,10 +411,17 @@ export default function PaymentSlips() {
   const [slipModal, setSlipModal] = useState(null);
   const [company, setCompany] = useState(DEFAULT_COMPANY);
 
+  const getSelectedBranchId = () => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('vth_selected_branch_id') || '';
+  };
+
   const load = () => {
     setLoading(true);
+    const branchId = getSelectedBranchId();
+    const params = branchId ? { branch_id: branchId } : undefined;
     Promise.all([
-      getAllInvoicePayments().then((r) => r.data || []).catch(() => []),
+      getAllInvoicePayments(params).then((r) => r.data || []).catch(() => []),
       getCompanySettings().then((r) => r.data || {}).catch(() => ({})),
     ]).then(([payments, settings]) => {
       setList(payments);

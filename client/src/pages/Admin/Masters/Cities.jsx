@@ -6,6 +6,11 @@ import Input from '../../../components/ui/Input';
 import Modal from '../../../components/ui/Modal';
 import { useToast } from '../../../context/ToastContext';
 
+const getSelectedBranchId = () => {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('vth_selected_branch_id') || '';
+};
+
 export default function Cities() {
   const { toast } = useToast();
   const [list, setList] = useState([]);
@@ -16,7 +21,9 @@ export default function Cities() {
 
   const load = () => {
     setLoading(true);
-    getCities().then((r) => setList(r.data || [])).finally(() => setLoading(false));
+    const branchId = getSelectedBranchId();
+    const params = branchId ? { branch_id: branchId } : undefined;
+    getCities(params).then((r) => setList(r.data || [])).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
 
@@ -26,7 +33,9 @@ export default function Cities() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setSaving(true);
-    (modal.data ? updateCity(modal.data.id, form) : createCity(form))
+    const branchId = getSelectedBranchId();
+    const payload = branchId ? { ...form, branch_id: Number(branchId) } : form;
+    (modal.data ? updateCity(modal.data.id, payload) : createCity(payload))
       .then(() => { toast(modal.data ? 'City updated' : 'City added'); setModal({ open: false, data: null }); load(); })
       .catch((err) => toast(err.response?.data?.message || 'Failed', 'error'))
       .finally(() => setSaving(false));

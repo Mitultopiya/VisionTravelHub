@@ -103,13 +103,20 @@ export default function Reports() {
   const [revEnd, setRevEnd] = useState('');
   const [revLoading, setRevLoading] = useState(false);
 
+  const getSelectedBranchId = () => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('vth_selected_branch_id') || '';
+  };
+
   const load = useCallback((quiet = false) => {
     if (quiet) setRefreshing(true); else setLoading(true);
+    const branchId = getSelectedBranchId();
+    const params = branchId ? { branch_id: branchId } : undefined;
     Promise.all([
-      getDashboard().then((r) => r.data).catch(() => null),
-      getPendingPayments().then((r) => r.data).catch(() => []),
-      getStaffPerformanceReport().then((r) => r.data).catch(() => []),
-      getRevenueReportFiltered('', '').then((r) => r.data).catch(() => []),
+      getDashboard(params).then((r) => r.data).catch(() => null),
+      getPendingPayments(params).then((r) => r.data).catch(() => []),
+      getStaffPerformanceReport(params).then((r) => r.data).catch(() => []),
+      getRevenueReportFiltered('', '', branchId).then((r) => r.data).catch(() => []),
     ]).then(([d, p, s, rv]) => {
       setDashboard(d);
       setPending(Array.isArray(p) ? p : []);
@@ -122,7 +129,8 @@ export default function Reports() {
 
   const loadRevenue = () => {
     setRevLoading(true);
-    getRevenueReportFiltered(revStart || undefined, revEnd || undefined)
+    const branchId = getSelectedBranchId();
+    getRevenueReportFiltered(revStart || undefined, revEnd || undefined, branchId)
       .then((r) => setRevenueRows(Array.isArray(r.data) ? r.data : []))
       .catch(() => {})
       .finally(() => setRevLoading(false));

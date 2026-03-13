@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { getQuotations, getQuotation, createQuotation, updateQuotation, deleteQuotation, getCustomers, getPackages, getHotels, getVehicles, convertQuotationToBooking, downloadQuotationPdf } from '../../services/api';
+import { getQuotations, getQuotation, createQuotation, updateQuotation, deleteQuotation, getCustomers, getPackages, getHotels, getVehicles, getCompanySettings, convertQuotationToBooking, downloadQuotationPdf } from '../../services/api';
 import Loading from '../../components/Loading';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Modal from '../../components/ui/Modal';
+import PaymentCard from '../../components/PaymentCard';
 import { useToast } from '../../context/ToastContext';
 
 const COMPANY = {
@@ -42,6 +43,7 @@ export default function Quotations() {
     ],
   });
   const [saving, setSaving] = useState(false);
+  const [paymentSettings, setPaymentSettings] = useState({});
   const packageSelected = !!form.package_id;
 
   const load = () => {
@@ -54,6 +56,7 @@ export default function Quotations() {
     getPackages().then((r) => setPackages(r.data || [])).catch(() => {});
     getHotels().then((r) => setHotels(r.data || [])).catch(() => {});
     getVehicles().then((r) => setVehicles(r.data || [])).catch(() => {});
+    getCompanySettings().then((r) => setPaymentSettings(r.data || {})).catch(() => {});
   }, []);
 
   const resolveHotel = (pkg) => {
@@ -103,7 +106,7 @@ export default function Quotations() {
           hotel_id: '',
           vehicle_id: '',
           valid_until: q.valid_until ? String(q.valid_until).slice(0, 10) : '',
-          family_count: '1',
+          family_count: q.family_count != null ? String(q.family_count) : '1',
           discount: q.discount != null ? String(q.discount) : '0',
           tax_percent: q.tax_percent != null ? String(q.tax_percent) : '0',
           terms_text: q.terms_text || '',
@@ -280,6 +283,7 @@ export default function Quotations() {
       discount: Number(form.discount) || 0,
       tax_percent: Number(form.tax_percent) || 0,
       terms_text: form.terms_text?.trim() ? form.terms_text.trim() : null,
+      family_count: people,
       items,
     };
     setSaving(true);
@@ -666,6 +670,7 @@ export default function Quotations() {
                 <p><span className="text-slate-500">Email:</span> {detail.customer_email || '—'}</p>
                 <p><span className="text-slate-500">Address:</span> —</p>
                 <p><span className="text-slate-500">Phone:</span> {detail.mobile || '—'}</p>
+                <p><span className="text-slate-500">No. of Persons:</span> {detail.family_count ?? 1}</p>
               </div>
             </div>
 
@@ -720,6 +725,8 @@ export default function Quotations() {
                 <p><span className="text-slate-500">Date:</span> _________________</p>
               </div>
             </div>
+
+            <PaymentCard settings={paymentSettings} className="mb-6" />
 
             {/* Actions */}
             <div className="flex flex-wrap justify-end gap-2 pt-4 border-t border-slate-200 print:hidden">
