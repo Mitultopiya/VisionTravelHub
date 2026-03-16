@@ -2,9 +2,9 @@ import pool from '../config/db.js';
 
 const tableColumns = {
   cities: ['name', 'country'],
-  hotels: ['name', 'city_id', 'address', 'contact', 'room_type', 'price'],
-  vehicles: ['name', 'type', 'capacity', 'price', 'city_id'],
-  activities: ['name', 'description', 'city_id', 'image_url'],
+  hotels: ['name', 'city_id', 'address', 'contact', 'room_type', 'price', 'base_price', 'markup_price', 'month_prices'],
+  vehicles: ['name', 'type', 'capacity', 'price', 'base_price', 'markup_price', 'month_prices', 'contact', 'city_id'],
+  activities: ['name', 'description', 'base_price', 'markup_price', 'price', 'month_prices', 'contact', 'city_id', 'image_url'],
 };
 
 async function list(req, res, table) {

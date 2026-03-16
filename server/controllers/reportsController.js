@@ -3,7 +3,10 @@ import pool from '../config/db.js';
 export const dashboard = async (req, res) => {
   try {
     const branchId = req.query.branch_id ? parseInt(req.query.branch_id, 10) : (req.branchId ?? null);
-    const bc = branchId ? ' AND branch_id = $1' : '';
+    const invAnd = branchId ? ' AND branch_id = $1' : '';
+    const invWhere = branchId ? ' WHERE branch_id = $1' : '';
+    const invAliasAnd = branchId ? ' AND i.branch_id = $1' : '';
+    const qWhere = branchId ? ' WHERE branch_id = $1' : '';
     const bp = branchId ? [branchId] : [];
 
     const [
@@ -24,7 +27,7 @@ export const dashboard = async (req, res) => {
     ] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM branches').then((r) => parseInt(r.rows[0].count, 10)),
       pool.query('SELECT COUNT(*) FROM customers' + (branchId ? ' WHERE branch_id = $1' : ''), bp).then((r) => parseInt(r.rows[0].count, 10)),
-      pool.query(`SELECT COALESCE(SUM(total),0) FROM invoices WHERE status NOT IN ('cancelled','draft')` + bc, bp).then((r) => Number(r.rows[0].coalesce)),
+      pool.query(`SELECT COALESCE(SUM(total),0) FROM invoices WHERE status NOT IN ('cancelled','draft')` + invAnd, bp).then((r) => Number(r.rows[0].coalesce)),
       pool.query('SELECT COALESCE(SUM(ip.amount),0) FROM invoice_payments ip JOIN invoices i ON ip.invoice_id = i.id' + (branchId ? ' WHERE i.branch_id = $1' : ''), bp).then((r) => Number(r.rows[0].coalesce)),
       pool.query('SELECT COUNT(*) FROM bookings' + (branchId ? ' WHERE branch_id = $1' : ''), bp).then((r) => parseInt(r.rows[0].count, 10)),
       pool.query(`SELECT COUNT(*) FROM bookings WHERE status NOT IN ('cancelled') AND (travel_start_date IS NULL OR travel_start_date >= CURRENT_DATE)` + (branchId ? ' AND branch_id = $1' : ''), bp).then((r) => parseInt(r.rows[0].count, 10)),
@@ -35,13 +38,13 @@ export const dashboard = async (req, res) => {
         COUNT(*) FILTER (WHERE status='overdue') as overdue,
         COUNT(*) FILTER (WHERE status='cancelled') as cancelled,
         COUNT(*) as total
-       FROM invoices` + bc, bp).then((r) => r.rows[0]),
+       FROM invoices` + invWhere, bp).then((r) => r.rows[0]),
       pool.query(`SELECT
         COUNT(*) FILTER (WHERE status='draft') as draft,
         COUNT(*) FILTER (WHERE status='sent') as sent,
         COUNT(*) FILTER (WHERE status='approved') as approved,
         COUNT(*) as total
-       FROM quotations` + bc, bp).then((r) => r.rows[0]),
+       FROM quotations` + qWhere, bp).then((r) => r.rows[0]),
       pool.query(`SELECT ip.mode, COUNT(*) as count, COALESCE(SUM(ip.amount),0) as total
        FROM invoice_payments ip JOIN invoices i ON ip.invoice_id = i.id` + (branchId ? ' WHERE i.branch_id = $1' : '') + ` GROUP BY ip.mode ORDER BY total DESC`, bp).then((r) => r.rows),
       pool.query(`SELECT
@@ -49,18 +52,18 @@ export const dashboard = async (req, res) => {
         DATE_TRUNC('month', i.invoice_date) as month_date,
         COALESCE(SUM(i.total),0) as revenue,
         COUNT(*) as count
-       FROM invoices i WHERE i.status NOT IN ('cancelled','draft') AND i.invoice_date >= NOW() - INTERVAL '12 months'` + bc + `
+       FROM invoices i WHERE i.status NOT IN ('cancelled','draft') AND i.invoice_date >= NOW() - INTERVAL '12 months'` + invAliasAnd + `
        GROUP BY DATE_TRUNC('month', i.invoice_date)
        ORDER BY month_date ASC`, bp).then((r) => r.rows),
       pool.query(`SELECT status, COUNT(*) as count, COALESCE(SUM(total),0) as total
-       FROM invoices` + bc + ` GROUP BY status ORDER BY total DESC`, bp).then((r) => r.rows),
+       FROM invoices` + invWhere + ` GROUP BY status ORDER BY total DESC`, bp).then((r) => r.rows),
       pool.query(
         `SELECT i.id, i.invoice_number, i.total, i.due_date, i.status,
                 c.name as customer_name, c.mobile as customer_mobile, i.package_name,
                 COALESCE((SELECT SUM(amount) FROM invoice_payments WHERE invoice_id = i.id),0) as paid
          FROM invoices i
          LEFT JOIN customers c ON i.customer_id = c.id
-         WHERE i.status NOT IN ('paid','cancelled')` + bc,
+         WHERE i.status NOT IN ('paid','cancelled')` + invAliasAnd,
         bp
       ).then((r) => {
         return r.rows

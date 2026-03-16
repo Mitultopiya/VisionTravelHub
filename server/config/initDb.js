@@ -134,15 +134,24 @@ export async function initDb() {
     `).catch(() => {});
 
     // Activities: image_url for activity image upload
-    await client.query(`
-      ALTER TABLE activities ADD COLUMN IF NOT EXISTS image_url VARCHAR(500);
-    `).catch(() => {});
+    await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS image_url VARCHAR(500);`).catch(() => {});
 
-    // Masters: branch_id for cities / hotels / vehicles / activities
+    // Masters: branch_id + hotel/vehicle/activity pricing for cities / hotels / vehicles / activities
     await client.query(`ALTER TABLE cities     ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;`).catch(() => {});
     await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;`).catch(() => {});
+    await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS base_price DECIMAL(12,2);`).catch(() => {});
+    await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS markup_price DECIMAL(12,2);`).catch(() => {});
+    await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS month_prices JSONB;`).catch(() => {});
     await client.query(`ALTER TABLE vehicles   ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;`).catch(() => {});
+    await client.query(`ALTER TABLE vehicles   ADD COLUMN IF NOT EXISTS base_price DECIMAL(12,2);`).catch(() => {});
+    await client.query(`ALTER TABLE vehicles   ADD COLUMN IF NOT EXISTS markup_price DECIMAL(12,2);`).catch(() => {});
+    await client.query(`ALTER TABLE vehicles   ADD COLUMN IF NOT EXISTS month_prices JSONB;`).catch(() => {});
+    await client.query(`ALTER TABLE vehicles   ADD COLUMN IF NOT EXISTS contact VARCHAR(100);`).catch(() => {});
     await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;`).catch(() => {});
+    await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS base_price DECIMAL(12,2);`).catch(() => {});
+    await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS markup_price DECIMAL(12,2);`).catch(() => {});
+    await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS month_prices JSONB;`).catch(() => {});
+    await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS contact VARCHAR(100);`).catch(() => {});
 
     // Packages: add new columns if table exists (old structure)
     await client.query(`
