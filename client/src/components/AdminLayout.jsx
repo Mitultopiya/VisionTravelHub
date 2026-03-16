@@ -33,7 +33,7 @@ const adminNav = [
     label: 'Preferred Items',
     icon: FaStar,
     children: [
-      { to: '/admin/masters/cities', label: 'Cities', icon: FaMapMarkerAlt },
+      { to: '/admin/masters/cities', label: 'States', icon: FaMapMarkerAlt },
       { to: '/admin/masters/hotels', label: 'Hotels', icon: FaHotel },
       { to: '/admin/masters/vehicles', label: 'Vehicles', icon: FaTruck },
       { to: '/admin/masters/activities', label: 'Activities', icon: FaStar },

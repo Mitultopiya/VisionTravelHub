@@ -16,7 +16,7 @@ import Input from '../../components/ui/Input';
 import Modal from '../../components/ui/Modal';
 import { useToast } from '../../context/ToastContext';
 
-const emptyCustomer = { name: '', mobile: '', email: '', address: '', passport: '', family_count: 0, notes: '' };
+const emptyCustomer = { name: '', mobile: '', email: '', address: '', family_count: 0, notes: '' };
 
 const getSelectedBranchId = () => {
   if (typeof window === 'undefined') return '';
@@ -68,7 +68,6 @@ export default function Customers() {
           mobile: c.mobile || '',
           email: c.email || '',
           address: c.address || '',
-          passport: c.passport || '',
           family_count: c.family_count ?? (Array.isArray(c.family) ? c.family.length : 0),
           notes: c.notes || '',
         });
@@ -84,7 +83,6 @@ export default function Customers() {
           mobile: row.mobile || '',
           email: row.email || '',
           address: row.address || '',
-          passport: row.passport || '',
           family_count: row.family_count ?? 0,
           notes: row.notes || '',
         });
@@ -272,25 +270,22 @@ export default function Customers() {
             <Input label="Mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
           </div>
           <Input label="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input label="Passport" value={form.passport} onChange={(e) => setForm({ ...form, passport: e.target.value })} />
-            <Input
-              label="Family count"
-              type="number"
-              min="0"
-              value={form.family_count}
-              onChange={(e) => handleFamilyCountChange(e.target.value)}
-            />
-          </div>
+          <Input
+            label="Family count"
+            type="number"
+            min="0"
+            value={form.family_count}
+            onChange={(e) => handleFamilyCountChange(e.target.value)}
+          />
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-500">Family members (name, relation, mobile)</p>
+              <p className="text-xs text-slate-500">Family members (name, mobile)</p>
               <Button
                 type="button"
                 size="sm"
                 variant="secondary"
                 onClick={() =>
-                  setFamilyRows((prev) => [...prev, { name: '', relation: '', mobile: '' }])
+                  setFamilyRows((prev) => [...prev, { name: '', mobile: '' }])
                 }
               >
                 + Add Member
@@ -299,16 +294,11 @@ export default function Customers() {
             {familyRows.length > 0 && (
               <div className="space-y-2">
                 {familyRows.map((row, idx) => (
-                  <div key={idx} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+                  <div key={idx} className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
                     <Input
                       label={`Member ${idx + 1} name`}
                       value={row.name}
                       onChange={(e) => updateFamilyRow(idx, 'name', e.target.value)}
-                    />
-                    <Input
-                      label="Relation"
-                      value={row.relation}
-                      onChange={(e) => updateFamilyRow(idx, 'relation', e.target.value)}
                     />
                     <Input
                       label="Mobile"
@@ -349,7 +339,6 @@ export default function Customers() {
               <p><span className="text-slate-500">Email</span><br />{detail.email || '-'}</p>
               <p><span className="text-slate-500">Mobile</span><br />{detail.mobile || '-'}</p>
               <p className="col-span-2"><span className="text-slate-500">Address</span><br />{detail.address || '-'}</p>
-              <p><span className="text-slate-500">Passport</span><br />{detail.passport || '-'}</p>
               <p><span className="text-slate-500">Family count</span><br />{detail.family_count ?? 0}</p>
               {detail.notes && <p className="col-span-2"><span className="text-slate-500">Notes</span><br />{detail.notes}</p>}
             </div>

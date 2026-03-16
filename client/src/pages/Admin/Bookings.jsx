@@ -63,6 +63,35 @@ export default function Bookings() {
     ).catch(() => {});
   }, []);
 
+  const computeDays = (start, end) => {
+    if (!start || !end) return 0;
+    const s = new Date(start);
+    const e = new Date(end);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 0;
+    const diffMs = e.getTime() - s.getTime();
+    if (diffMs < 0) return 0;
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+  };
+
+  const recalcTotal = (patch) => {
+    setForm((prev) => {
+      const next = { ...prev, ...(patch || {}) };
+      const days = computeDays(next.travel_start_date, next.travel_end_date);
+      if (!days) {
+        return next;
+      }
+      const hotel = hotels.find((h) => String(h.id) === String(next.assigned_hotel_id));
+      const vehicle = vehicles.find((v) => String(v.id) === String(next.assigned_vehicle_id));
+      const hotelRate = hotel ? Number(hotel.price || 0) : 0;
+      const vehicleRate = vehicle ? Number(vehicle.price || 0) : 0;
+      const total = days * (hotelRate + vehicleRate);
+      return {
+        ...next,
+        total_amount: total ? String(total) : next.total_amount,
+      };
+    });
+  };
+
   const openAdd = () => {
     setForm({
       customer_id: '', package_id: '', travel_start_date: '', travel_end_date: '', total_amount: '', status: 'inquiry',
@@ -181,8 +210,18 @@ export default function Bookings() {
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Start date" type="date" value={form.travel_start_date} onChange={(e) => setForm({ ...form, travel_start_date: e.target.value })} />
-            <Input label="End date" type="date" value={form.travel_end_date} onChange={(e) => setForm({ ...form, travel_end_date: e.target.value })} />
+            <Input
+              label="Start date"
+              type="date"
+              value={form.travel_start_date}
+              onChange={(e) => recalcTotal({ travel_start_date: e.target.value })}
+            />
+            <Input
+              label="End date"
+              type="date"
+              value={form.travel_end_date}
+              onChange={(e) => recalcTotal({ travel_end_date: e.target.value })}
+            />
           </div>
           <Input label="Total amount (₹)" type="number" min="0" value={form.total_amount} onChange={(e) => setForm({ ...form, total_amount: e.target.value })} />
           <div>
@@ -194,14 +233,14 @@ export default function Bookings() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Hotel</label>
-              <select value={form.assigned_hotel_id} onChange={(e) => setForm({ ...form, assigned_hotel_id: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+              <select value={form.assigned_hotel_id} onChange={(e) => recalcTotal({ assigned_hotel_id: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                 <option value="">— None —</option>
                 {hotels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Vehicle</label>
-              <select value={form.assigned_vehicle_id} onChange={(e) => setForm({ ...form, assigned_vehicle_id: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+              <select value={form.assigned_vehicle_id} onChange={(e) => recalcTotal({ assigned_vehicle_id: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                 <option value="">— None —</option>
                 {vehicles.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>

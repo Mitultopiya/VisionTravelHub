@@ -34,6 +34,7 @@ export default function Quotations() {
     vehicle_id: '',
     valid_until: '',
     family_count: '1',
+    trip_days: '',
     discount: '0',
     tax_percent: '0',
     terms_text: '',
@@ -86,6 +87,7 @@ export default function Quotations() {
       vehicle_id: '',
       valid_until: '',
       family_count: '1',
+      trip_days: '',
       discount: '0',
       tax_percent: '0',
       terms_text: '',
@@ -107,6 +109,7 @@ export default function Quotations() {
           vehicle_id: '',
           valid_until: q.valid_until ? String(q.valid_until).slice(0, 10) : '',
           family_count: q.family_count != null ? String(q.family_count) : '1',
+          trip_days: '',
           discount: q.discount != null ? String(q.discount) : '0',
           tax_percent: q.tax_percent != null ? String(q.tax_percent) : '0',
           terms_text: q.terms_text || '',
@@ -173,6 +176,7 @@ export default function Quotations() {
     if (!pkg) return null;
     const hotel = resolveHotel(pkg);
     const vehicle = resolveVehicle(pkg);
+    const days = Number(form.trip_days) || 1;
     return {
       pkg,
       hotel,
@@ -187,13 +191,13 @@ export default function Quotations() {
         {
           item: 'Hotel',
           description: `Hotel: ${hotel.name}`,
-          qty: '1',
+          qty: String(days),
           price: String(Number(hotel.price || 0)),
         },
         {
           item: 'Vehicle',
           description: `Vehicle: ${vehicle.name}`,
-          qty: '1',
+          qty: String(days),
           price: String(Number(vehicle.price || 0)),
         },
       ],
@@ -234,7 +238,7 @@ export default function Quotations() {
         ...items[idx],
         item: 'Hotel',
         description: `Hotel: ${h?.name || 'Hotel'}`,
-        qty: items[idx].qty || '1',
+        qty: String(Number(f.trip_days) || 1),
         price: h ? String(Number(h.price || 0)) : items[idx].price,
       };
       return { ...f, hotel_id: hotelId, items };
@@ -254,7 +258,7 @@ export default function Quotations() {
         ...items[idx],
         item: 'Vehicle',
         description: `Vehicle: ${v?.name || 'Vehicle'}`,
-        qty: items[idx].qty || '1',
+        qty: String(Number(f.trip_days) || 1),
         price: v ? String(Number(v.price || 0)) : items[idx].price,
       };
       return { ...f, vehicle_id: vehicleId, items };
@@ -431,6 +435,28 @@ export default function Quotations() {
                   min="1"
                   value={form.family_count}
                   onChange={(e) => setForm({ ...form, family_count: e.target.value })}
+                />
+                <Input
+                  label="Trip days"
+                  type="number"
+                  min="1"
+                  value={form.trip_days}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setForm((prev) => {
+                      const days = Number(value) || 1;
+                      const items = (prev.items || []).map((it) => {
+                        if (it.item === 'Hotel' || (it.description || '').startsWith('Hotel:')) {
+                          return { ...it, qty: String(days) };
+                        }
+                        if (it.item === 'Vehicle' || (it.description || '').startsWith('Vehicle:')) {
+                          return { ...it, qty: String(days) };
+                        }
+                        return it;
+                      });
+                      return { ...prev, trip_days: value, items };
+                    });
+                  }}
                 />
               </div>
             </div>
