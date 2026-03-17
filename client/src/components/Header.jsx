@@ -1,9 +1,20 @@
+import { useEffect, useState } from 'react';
 import { getStoredUser, logout } from '../utils/auth';
+import { getBranches } from '../services/api';
+import { getSelectedBranchId, setSelectedBranchId } from '../utils/branch';
 import Button from './ui/Button';
 import { FaBars } from 'react-icons/fa';
 
 export default function Header({ onMenuClick }) {
   const user = getStoredUser();
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
+
+  useEffect(() => {
+    getBranches()
+      .then((r) => setBranches(r.data || []))
+      .catch(() => setBranches([]));
+  }, []);
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
@@ -23,6 +34,27 @@ export default function Header({ onMenuClick }) {
           <span className="text-slate-500 text-xs sm:text-sm font-medium truncate">Admin Panel</span>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+          <div className="hidden md:flex items-center gap-2">
+            <label className="text-xs font-medium text-slate-500">Branch</label>
+            <select
+              value={branchId}
+              onChange={(e) => {
+                const v = e.target.value;
+                setBranchId(v);
+                setSelectedBranchId(v);
+                // notify pages that read localStorage
+                window.dispatchEvent(new Event('vth_branch_changed'));
+              }}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-800 bg-white min-w-[180px] focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none"
+            >
+              <option value="all">All Branches</option>
+              {branches.map((b) => (
+                <option key={b.id} value={String(b.id)}>
+                  {b.name} ({b.code})
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="text-right hidden sm:block min-w-0">
             <p className="text-sm font-medium text-slate-800 truncate">{user?.name}</p>
             <p className="text-xs text-slate-500 capitalize">{user?.role}</p>

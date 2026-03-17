@@ -66,6 +66,7 @@ function App() {
         <Route path="masters/vehicles" element={<AdminVehicles />} />
         <Route path="masters/activities" element={<AdminActivities />} />
         <Route path="settings" element={<AdminSettings />} />
+        <Route path="settings/:section" element={<AdminSettings />} />
       </Route>
 
       <Route path="/staff" element={<ProtectedRoute allowRoles={['staff']}><StaffLayout /></ProtectedRoute>}>

@@ -16,6 +16,7 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { useToast } from '../../context/ToastContext';
+import { getSelectedBranchId, branchParams } from '../../utils/branch';
 import { FaPlus, FaTrash, FaImage } from 'react-icons/fa';
 
 const IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp';
@@ -46,6 +47,7 @@ export default function PackageBuilder() {
   const [hotels, setHotels] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [cityToAdd, setCityToAdd] = useState('');
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const imageInputRef = useRef(null);
@@ -74,10 +76,18 @@ export default function PackageBuilder() {
         .catch(() => toast('Failed to load package', 'error'))
         .finally(() => setLoading(false));
     }
-    getCities().then((r) => setCities(r.data || [])).catch(() => {});
+    getCities(branchParams(branchId))
+      .then((r) => setCities(r.data || []))
+      .catch(() => {});
     getHotels().then((r) => setHotels(r.data || [])).catch(() => {});
     getVehicles().then((r) => setVehicles(r.data || [])).catch(() => {});
-  }, [id, isEdit, toast]);
+  }, [id, isEdit, toast, branchId]);
+
+  useEffect(() => {
+    const onBranch = () => setBranchId(getSelectedBranchId());
+    window.addEventListener('vth_branch_changed', onBranch);
+    return () => window.removeEventListener('vth_branch_changed', onBranch);
+  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -216,14 +226,14 @@ export default function PackageBuilder() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Cities</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">States</label>
               <div className="flex gap-2">
                 <select
                   value={cityToAdd}
                   onChange={(e) => setCityToAdd(e.target.value)}
                   className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 >
-                  <option value="">— Select city —</option>
+                  <option value="">— Select state —</option>
                   {cities.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -239,8 +249,11 @@ export default function PackageBuilder() {
                   {form.city_ids.map((cid) => {
                     const city = cities.find((c) => Number(c.id) === Number(cid));
                     return (
-                      <span key={cid} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
-                        {city?.name || `City #${cid}`}
+                      <span
+                        key={cid}
+                        className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700"
+                      >
+                        {city?.name || `State #${cid}`}
                         <button type="button" onClick={() => removeCity(cid)} className="text-slate-500 hover:text-red-600">
                           ×
                         </button>

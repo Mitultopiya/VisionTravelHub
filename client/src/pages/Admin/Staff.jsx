@@ -7,11 +7,6 @@ import Modal from '../../components/ui/Modal';
 import { useToast } from '../../context/ToastContext';
 import { RiLockPasswordLine } from 'react-icons/ri';
 
-const getSelectedBranchId = () => {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('vth_selected_branch_id') || '';
-};
-
 export default function Staff() {
   const { toast } = useToast();
   const [list, setList] = useState([]);
@@ -27,9 +22,7 @@ export default function Staff() {
 
   const load = () => {
     setLoading(true);
-    const branchId = getSelectedBranchId();
-    const params = branchId ? { branch_id: branchId } : undefined;
-    getStaff(params).then((r) => setList(r.data || [])).finally(() => setLoading(false));
+    getStaff().then((r) => setList(r.data || [])).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
 
@@ -38,8 +31,7 @@ export default function Staff() {
   }, []);
 
   const openAdd = () => {
-    const selectedId = getSelectedBranchId();
-    const defaultBranch = branches.find((b) => String(b.id) === selectedId) || branches[0] || null;
+    const defaultBranch = branches[0] || null;
     const branchLabel = defaultBranch ? defaultBranch.name : 'Ahmedabad';
     setForm({ name: '', email: '', password: '', role: 'staff', branch: branchLabel, branch_id: defaultBranch?.id || '' });
     setModal({ open: true, data: null });

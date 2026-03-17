@@ -12,6 +12,9 @@ import {
   FaHotel,
   FaTruck,
   FaStar,
+  FaBuilding,
+  FaUniversity,
+  FaQrcode,
 } from 'react-icons/fa';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -41,7 +44,17 @@ const adminNav = [
   },
   { to: '/admin/reports', label: 'Reports', icon: FaChartLine },
   { to: '/admin/staff', label: 'Staff', icon: FaUserFriends },
-  { to: '/admin/settings', label: 'Settings', icon: FaCog },
+  {
+    label: 'Settings',
+    icon: FaCog,
+    children: [
+      { to: '/admin/settings/company', label: 'Company Information', icon: FaBuilding },
+      { to: '/admin/settings/bank', label: 'Bank Details', icon: FaUniversity },
+      { to: '/admin/settings/payment', label: 'Payment Settings', icon: FaQrcode },
+      { to: '/admin/settings/branches', label: 'Branch Management', icon: FaMapMarkerAlt },
+      { to: '/admin/settings/preview', label: 'PDF Header Preview', icon: FaFileInvoice },
+    ],
+  },
 ];
 
 export default function AdminLayout() {

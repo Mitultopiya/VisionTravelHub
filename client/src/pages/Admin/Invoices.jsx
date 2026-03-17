@@ -11,10 +11,12 @@ import {
   getBookings,
   getPackages,
   getStaff,
+  getBranches,
   getCompanySettings,
   downloadInvoicePdf,
 } from '../../services/api';
 import { getStoredUser } from '../../utils/auth';
+import { getSelectedBranchId, branchParams } from '../../utils/branch';
 import Loading from '../../components/Loading';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -63,6 +65,15 @@ function StatusBadge({ status }) {
 
 const emptyItem = () => ({ description: '', quantity: '1', rate: '', amount: '' });
 
+const getTripDays = (start, end) => {
+  if (!start || !end) return 1;
+  const s = new Date(start);
+  const e = new Date(end);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 1;
+  const diff = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+  return diff > 0 ? diff : 1;
+};
+
 export default function Invoices() {
   const { toast } = useToast();
   const user = getStoredUser();
@@ -77,10 +88,13 @@ export default function Invoices() {
   const [bookings, setBookings] = useState([]);
   const [packages, setPackages] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
   const [nextNumber, setNextNumber] = useState('');
   const [saving, setSaving] = useState(false);
   const [paymentSettings, setPaymentSettings] = useState({});
   const [form, setForm] = useState({
+    branch_id: '',
     invoice_number: '',
     invoice_date: new Date().toISOString().slice(0, 10),
     due_date: '',
@@ -110,24 +124,28 @@ export default function Invoices() {
     items: [emptyItem(), emptyItem()],
   });
 
-  const getSelectedBranchId = () => {
-    if (typeof window === 'undefined') return '';
-    return localStorage.getItem('vth_selected_branch_id') || '';
-  };
-
   const load = () => {
     setLoading(true);
-    const branchId = getSelectedBranchId();
-    const params = branchId ? { branch_id: branchId } : undefined;
+    const params = branchParams(branchId);
     getInvoices(params).then((r) => setList(r.data || [])).finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [branchId]);
   useEffect(() => {
-    getCustomers({ limit: 500 }).then((r) => setCustomers(r.data?.data || r.data || [])).catch(() => {});
+    const params = branchId && branchId !== 'all' ? { limit: 500, branch_id: branchId } : { limit: 500 };
+    getCustomers(params).then((r) => setCustomers(r.data?.data || r.data || [])).catch(() => {});
+  }, [branchId]);
+  useEffect(() => {
+    const params = branchId && branchId !== 'all' ? { limit: 500, branch_id: branchId } : { limit: 500 };
+    getCustomers(params).then((r) => setCustomers(r.data?.data || r.data || [])).catch(() => {});
     getBookings({ limit: 200 }).then((r) => setBookings(r.data?.data || r.data || [])).catch(() => {});
     getPackages().then((r) => setPackages(r.data || [])).catch(() => {});
     getStaff().then((r) => setStaff(r.data || [])).catch(() => {});
+    getBranches().then((r) => setBranches(r.data || [])).catch(() => setBranches([]));
     getCompanySettings().then((r) => setPaymentSettings(r.data || {})).catch(() => {});
+
+    const onBranch = () => setBranchId(getSelectedBranchId());
+    window.addEventListener('vth_branch_changed', onBranch);
+    return () => window.removeEventListener('vth_branch_changed', onBranch);
   }, []);
 
   const openAdd = () => {
@@ -140,6 +158,7 @@ export default function Invoices() {
     due.setDate(due.getDate() + 7);
     setForm({
       ...form,
+      branch_id: branchId !== 'all' ? String(branchId) : '',
       invoice_number: '',
       invoice_date: today,
       due_date: due.toISOString().slice(0, 10),
@@ -177,6 +196,7 @@ export default function Invoices() {
         const inv = r.data;
         setForm({
           ...form,
+          branch_id: inv.branch_id ? String(inv.branch_id) : (branchId !== 'all' ? String(branchId) : ''),
           invoice_number: inv.invoice_number || '',
           invoice_date: inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : form.invoice_date,
           due_date: inv.due_date ? String(inv.due_date).slice(0, 10) : form.due_date,
@@ -186,7 +206,7 @@ export default function Invoices() {
           place_of_supply: inv.place_of_supply || '',
           billing_address: inv.billing_address || '',
           customer_gst: inv.customer_gst || '',
-          sales_executive_id: inv.created_by ? String(inv.created_by) : '',
+          sales_executive_id: inv.created_by ? String(inv.created_by) : (user?.id ? String(user.id) : ''),
           travel_destination: inv.travel_destination || '',
           travel_start_date: inv.travel_start_date ? String(inv.travel_start_date).slice(0, 10) : '',
           travel_end_date: inv.travel_end_date ? String(inv.travel_end_date).slice(0, 10) : '',
@@ -255,18 +275,59 @@ export default function Invoices() {
     const packagePrice = Number(pkg.price || 0);
     const hotelPrice = Number(pkg.default_hotel_price || 0);
     const vehiclePrice = Number(pkg.default_vehicle_price || 0);
-    setForm((f) => ({
-      ...f,
-      package_id: String(pkg.id),
-      package_name: pkg.name || pkg.title || f.package_name,
-      hotel_category: pkg.default_hotel_name || f.hotel_category,
-      vehicle_type: pkg.default_vehicle_name || f.vehicle_type,
-      items: [
-        { description: `Package: ${pkg.name || pkg.title || 'Package'}`, quantity: '1', rate: String(packagePrice), amount: String(packagePrice) },
-        { description: `Hotel: ${pkg.default_hotel_name || 'Default'}`, quantity: '1', rate: String(hotelPrice), amount: String(hotelPrice) },
-        { description: `Vehicle: ${pkg.default_vehicle_name || 'Default'}`, quantity: '1', rate: String(vehiclePrice), amount: String(vehiclePrice) },
-      ],
-    }));
+    setForm((f) => {
+      const adults = Number(f.adults) || 1;
+      const days = getTripDays(f.travel_start_date, f.travel_end_date);
+      const pkgQty = adults;
+      const hotelQty = days;
+      const vehicleQty = days;
+      return {
+        ...f,
+        package_id: String(pkg.id),
+        package_name: pkg.name || pkg.title || f.package_name,
+        hotel_category: pkg.default_hotel_name || f.hotel_category,
+        vehicle_type: pkg.default_vehicle_name || f.vehicle_type,
+        items: [
+          {
+            description: `Package: ${pkg.name || pkg.title || 'Package'}`,
+            quantity: String(pkgQty),
+            rate: String(packagePrice),
+            amount: String(pkgQty * packagePrice),
+          },
+          {
+            description: `Hotel: ${pkg.default_hotel_name || 'Default'}`,
+            quantity: String(hotelQty),
+            rate: String(hotelPrice),
+            amount: String(hotelQty * hotelPrice),
+          },
+          {
+            description: `Vehicle: ${pkg.default_vehicle_name || 'Default'}`,
+            quantity: String(vehicleQty),
+            rate: String(vehiclePrice),
+            amount: String(vehicleQty * vehiclePrice),
+          },
+        ],
+      };
+    });
+  };
+
+  const recalcPackageItems = (formState) => {
+    const adults = Number(formState.adults) || 1;
+    const days = getTripDays(formState.travel_start_date, formState.travel_end_date);
+    const items = formState.items.map((it) => {
+      if (!it.description) return it;
+      const rate = Number(it.rate) || 0;
+      if (it.description.startsWith('Package:')) {
+        const qty = adults;
+        return { ...it, quantity: String(qty), amount: String(qty * rate) };
+      }
+      if (it.description.startsWith('Hotel:') || it.description.startsWith('Vehicle:')) {
+        const qty = days;
+        return { ...it, quantity: String(qty), amount: String(qty * rate) };
+      }
+      return it;
+    });
+    return { ...formState, items };
   };
 
   const addItem = () => setForm((f) => ({ ...f, items: [...f.items, emptyItem()] }));
@@ -306,6 +367,7 @@ export default function Invoices() {
         amount: Number(i.amount) || 0,
       }));
     const payload = {
+      branch_id: form.branch_id ? Number(form.branch_id) : undefined,
       invoice_number: editingId ? undefined : (form.invoice_number || nextNumber),
       booking_id: form.booking_id || null,
       customer_id: Number(form.customer_id),
@@ -409,6 +471,7 @@ export default function Invoices() {
                 <tr className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
                   <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider rounded-tl-2xl">Invoice No</th>
                   <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Customer</th>
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Branch</th>
                   <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Date</th>
                   <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Due</th>
                   <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Total</th>
@@ -422,6 +485,7 @@ export default function Invoices() {
                   <tr key={row.id || i} className="hover:bg-teal-50/40 transition-colors group">
                     <td className="px-5 py-3.5 text-sm font-semibold text-teal-700">{row.invoice_number || '-'}</td>
                     <td className="px-5 py-3.5 text-sm text-slate-800 font-medium">{row.customer_name || '-'}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-600">{row.branch_name || '-'}</td>
                     <td className="px-5 py-3.5 text-sm text-slate-600">{row.invoice_date ? String(row.invoice_date).slice(0, 10) : '-'}</td>
                     <td className="px-5 py-3.5 text-sm text-slate-600">{row.due_date ? String(row.due_date).slice(0, 10) : '-'}</td>
                     <td className="px-5 py-3.5 text-sm text-right font-semibold text-slate-800">₹{Number(row.total || 0).toLocaleString()}</td>
@@ -458,33 +522,22 @@ export default function Invoices() {
           <Card>
             <h3 className="text-sm font-semibold text-slate-700 mb-3">Basic Invoice Info</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Branch *</label>
+                <select
+                  value={form.branch_id || (branchId !== 'all' ? String(branchId) : '')}
+                  onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  required
+                >
+                  <option value="">— Select Branch —</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={String(b.id)}>{b.name} ({b.code})</option>
+                  ))}
+                </select>
+              </div>
               <Input label="Invoice Number" value={editingId ? form.invoice_number : (form.invoice_number || nextNumber)} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} placeholder="Auto" disabled={!!editingId} />
               <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={(e) => setForm({ ...form, invoice_date: e.target.value })} required />
-              <Input label="Due Date" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} required />
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Booking</label>
-                <select value={form.booking_id} onChange={(e) => { setForm({ ...form, booking_id: e.target.value }); onBookingSelect(e.target.value); }} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                  <option value="">— None —</option>
-                  {bookings.map((b) => (
-                    <option key={b.id} value={b.id}>#{b.id} – {b.customer_name} – {b.package_name || '-'}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Package</label>
-                <select
-                  value={form.package_id}
-                  onChange={(e) => onPackageSelect(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="">— Select —</option>
-                  {packages.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {(p.name || p.title)} — ₹{Number(p.price || 0).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Customer *</label>
                 <select value={form.customer_id} onChange={(e) => { setForm({ ...form, customer_id: e.target.value }); onCustomerSelect(e.target.value); }} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required>
@@ -503,7 +556,6 @@ export default function Invoices() {
                   ))}
                 </select>
               </div>
-              <Input label="Place of Supply (State)" value={form.place_of_supply} onChange={(e) => setForm({ ...form, place_of_supply: e.target.value })} />
             </div>
           </Card>
 
@@ -512,7 +564,6 @@ export default function Invoices() {
             <h3 className="text-sm font-semibold text-slate-700 mb-3">Billing Details</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input label="Billing Address" value={form.billing_address} onChange={(e) => setForm({ ...form, billing_address: e.target.value })} />
-              <Input label="Customer GST Number" value={form.customer_gst} onChange={(e) => setForm({ ...form, customer_gst: e.target.value })} />
               <Input label="Company GST No. (shown in PDF)" value={form.company_gst} onChange={(e) => setForm({ ...form, company_gst: e.target.value })} placeholder={COMPANY?.gst || 'GST Number'} />
             </div>
           </Card>
@@ -521,12 +572,48 @@ export default function Invoices() {
           <Card>
             <h3 className="text-sm font-semibold text-slate-700 mb-3">Travel Details</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <Input label="Package Name" value={form.package_name} onChange={(e) => setForm({ ...form, package_name: e.target.value })} />
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Package Name</label>
+                <select
+                  value={form.package_id}
+                  onChange={(e) => onPackageSelect(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">— Select Package —</option>
+                  {packages.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {(p.name || p.title)} — ₹{Number(p.price || 0).toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <Input label="Destination" value={form.travel_destination} onChange={(e) => setForm({ ...form, travel_destination: e.target.value })} />
-              <Input label="Adults" type="number" min="0" value={form.adults} onChange={(e) => setForm({ ...form, adults: e.target.value })} />
+              <Input
+                label="Adults"
+                type="number"
+                min="0"
+                value={form.adults}
+                onChange={(e) =>
+                  setForm((prev) => recalcPackageItems({ ...prev, adults: e.target.value }))
+                }
+              />
               <Input label="Children" type="number" min="0" value={form.children} onChange={(e) => setForm({ ...form, children: e.target.value })} />
-              <Input label="Travel Start" type="date" value={form.travel_start_date} onChange={(e) => setForm({ ...form, travel_start_date: e.target.value })} />
-              <Input label="Travel End" type="date" value={form.travel_end_date} onChange={(e) => setForm({ ...form, travel_end_date: e.target.value })} />
+              <Input
+                label="Travel Start"
+                type="date"
+                value={form.travel_start_date}
+                onChange={(e) =>
+                  setForm((prev) => recalcPackageItems({ ...prev, travel_start_date: e.target.value }))
+                }
+              />
+              <Input
+                label="Travel End"
+                type="date"
+                value={form.travel_end_date}
+                onChange={(e) =>
+                  setForm((prev) => recalcPackageItems({ ...prev, travel_end_date: e.target.value }))
+                }
+              />
               <Input label="Hotel Category" value={form.hotel_category} onChange={(e) => setForm({ ...form, hotel_category: e.target.value })} />
               <Input label="Vehicle Type" value={form.vehicle_type} onChange={(e) => setForm({ ...form, vehicle_type: e.target.value })} />
             </div>
@@ -594,8 +681,6 @@ export default function Invoices() {
                   </div>
                 </div>
                 <div className="flex justify-between text-sm gap-2"><span className="text-slate-600">Tax %</span><Input type="number" min="0" step="0.01" value={form.tax_percent} onChange={(e) => setForm({ ...form, tax_percent: e.target.value })} className="w-20 inline-block" /></div>
-                <div className="flex justify-between text-sm gap-2"><span className="text-slate-600">Service Charges</span><Input type="number" min="0" step="0.01" value={form.service_charges} onChange={(e) => setForm({ ...form, service_charges: e.target.value })} className="w-20 sm:w-24" /></div>
-                <div className="flex justify-between text-sm gap-2"><span className="text-slate-600">Round Off</span><Input type="number" step="0.01" value={form.round_off} onChange={(e) => setForm({ ...form, round_off: e.target.value })} className="w-20 sm:w-24" /></div>
               </div>
               <div className="border-t md:border-t-0 md:border-l border-slate-100 pt-3 md:pt-0 md:pl-4 min-w-0">
                 <div className="flex justify-between text-base font-bold text-slate-800 mt-1">

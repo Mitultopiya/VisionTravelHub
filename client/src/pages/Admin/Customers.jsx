@@ -15,13 +15,10 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Modal from '../../components/ui/Modal';
 import { useToast } from '../../context/ToastContext';
+import { getSelectedBranchId, branchParams } from '../../utils/branch';
+import { getBranches } from '../../services/api';
 
 const emptyCustomer = { name: '', mobile: '', email: '', address: '', family_count: 0, notes: '' };
-
-const getSelectedBranchId = () => {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('vth_selected_branch_id') || '';
-};
 
 export default function Customers() {
   const { toast } = useToast();
@@ -35,12 +32,12 @@ export default function Customers() {
   const [saving, setSaving] = useState(false);
   const [familyForm, setFamilyForm] = useState({ name: '', relation: '', mobile: '' });
   const [familyRows, setFamilyRows] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
 
   const load = () => {
     setLoading(true);
-    const branchId = getSelectedBranchId();
-    const params = { page, limit: 10, search: search || undefined };
-    if (branchId) params.branch_id = branchId;
+    const params = { page, limit: 10, search: search || undefined, ...(branchParams(branchId) || {}) };
     getCustomers(params)
       .then((r) => setList({ data: r.data.data || [], total: r.data.total || 0 }))
       .catch(() => toast('Failed to load customers', 'error'))
@@ -52,6 +49,13 @@ export default function Customers() {
     const t = setTimeout(() => { setPage(1); load(); }, 400);
     return () => clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    getBranches().then((r) => setBranches(r.data || [])).catch(() => setBranches([]));
+    const onBranch = () => setBranchId(getSelectedBranchId());
+    window.addEventListener('vth_branch_changed', onBranch);
+    return () => window.removeEventListener('vth_branch_changed', onBranch);
+  }, []);
 
   const openAdd = () => {
     setForm(emptyCustomer);
@@ -68,6 +72,7 @@ export default function Customers() {
           mobile: c.mobile || '',
           email: c.email || '',
           address: c.address || '',
+          branch_id: c.branch_id ? String(c.branch_id) : '',
           family_count: c.family_count ?? (Array.isArray(c.family) ? c.family.length : 0),
           notes: c.notes || '',
         });
@@ -83,6 +88,7 @@ export default function Customers() {
           mobile: row.mobile || '',
           email: row.email || '',
           address: row.address || '',
+          branch_id: row.branch_id ? String(row.branch_id) : '',
           family_count: row.family_count ?? 0,
           notes: row.notes || '',
         });
@@ -122,7 +128,12 @@ export default function Customers() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setSaving(true);
-    const payload = { ...form, family_count: Number(form.family_count) || 0 };
+    const selected = form.branch_id || (branchId !== 'all' ? branchId : '') || '';
+    const payload = {
+      ...form,
+      family_count: Number(form.family_count) || 0,
+      branch_id: selected ? Number(selected) : undefined,
+    };
     if (modal.mode === 'add') {
       createCustomer(payload)
         .then(async (res) => {
@@ -208,13 +219,33 @@ export default function Customers() {
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="px-5 pt-4 pb-3 border-b border-slate-100">
-          <input
-            type="search"
-            placeholder="Search by name, email, mobile..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full sm:w-72 rounded-xl border border-slate-200 px-4 py-2 text-sm focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none"
-          />
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+            <input
+              type="search"
+              placeholder="Search by name, email, mobile..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full sm:w-72 rounded-xl border border-slate-200 px-4 py-2 text-sm focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none"
+            />
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-slate-500">Branch</label>
+              <select
+                value={branchId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setBranchId(v);
+                  localStorage.setItem('vth_selected_branch_id', v);
+                  window.dispatchEvent(new Event('vth_branch_changed'));
+                }}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white min-w-[180px] focus:ring-2 focus:ring-teal-400"
+              >
+                <option value="all">All Branches</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={String(b.id)}>{b.name} ({b.code})</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
         {loading ? <Loading /> : list.data.length === 0 ? (
           <div className="py-16 text-center text-slate-400 text-sm">No customers yet. Add your first customer.</div>
@@ -226,6 +257,7 @@ export default function Customers() {
                   <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Name</th>
                   <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Email</th>
                   <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Mobile</th>
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Branch</th>
                   <th className="text-center px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Family</th>
                   <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Actions</th>
                 </tr>
@@ -236,6 +268,7 @@ export default function Customers() {
                     <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">{row.name || '-'}</td>
                     <td className="px-5 py-3.5 text-sm text-slate-600">{row.email || '-'}</td>
                     <td className="px-5 py-3.5 text-sm text-slate-600">{row.mobile || '-'}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-600">{row.branch_name || '-'}</td>
                     <td className="px-5 py-3.5 text-sm text-center text-slate-600">{row.family_count ?? 0}</td>
                     <td className="px-5 py-3.5 text-right">
                       <div className="flex items-center justify-end gap-1.5">
@@ -264,6 +297,20 @@ export default function Customers() {
       {/* Add/Edit Modal */}
       <Modal open={modal.open} onClose={() => setModal({ open: false, mode: 'add', data: null })} title={modal.mode === 'add' ? 'Add Customer' : 'Edit Customer'} size="lg">
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Branch *</label>
+            <select
+              value={form.branch_id || (branchId !== 'all' ? branchId : '')}
+              onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+              required
+            >
+              <option value="">— Select Branch —</option>
+              {branches.map((b) => (
+                <option key={b.id} value={String(b.id)}>{b.name} ({b.code})</option>
+              ))}
+            </select>
+          </div>
           <Input label="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />

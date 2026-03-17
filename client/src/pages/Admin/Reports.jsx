@@ -3,13 +3,14 @@ import {
   getDashboard, getPendingPayments, getStaffPerformanceReport, getRevenueReportFiltered,
 } from '../../services/api';
 import Loading from '../../components/Loading';
+import { getSelectedBranchId, branchParams } from '../../utils/branch';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Tooltip,
   XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend,
 } from 'recharts';
 import {
   RiRefreshLine, RiUserLine, RiMoneyRupeeCircleLine, RiFileList3Line,
-  RiTimeLine, RiBarChartLine, RiPieChartLine, RiTeamLine,
+  RiTimeLine, RiBarChartLine, RiPieChartLine, RiTeamLine, RiMapPinLine,
 } from 'react-icons/ri';
 
 /* ── helpers ── */
@@ -102,39 +103,46 @@ export default function Reports() {
   const [revStart, setRevStart] = useState('');
   const [revEnd, setRevEnd] = useState('');
   const [revLoading, setRevLoading] = useState(false);
-
-  const getSelectedBranchId = () => {
-    if (typeof window === 'undefined') return '';
-    return localStorage.getItem('vth_selected_branch_id') || '';
-  };
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
 
   const load = useCallback((quiet = false) => {
     if (quiet) setRefreshing(true); else setLoading(true);
-    const branchId = getSelectedBranchId();
-    const params = branchId ? { branch_id: branchId } : undefined;
+    const params = branchParams(branchId);
     Promise.all([
       getDashboard(params).then((r) => r.data).catch(() => null),
       getPendingPayments(params).then((r) => r.data).catch(() => []),
       getStaffPerformanceReport(params).then((r) => r.data).catch(() => []),
-      getRevenueReportFiltered('', '', branchId).then((r) => r.data).catch(() => []),
+      getRevenueReportFiltered('', '', branchId !== 'all' ? branchId : undefined).then((r) => r.data).catch(() => []),
     ]).then(([d, p, s, rv]) => {
       setDashboard(d);
       setPending(Array.isArray(p) ? p : []);
       setStaffPerf(Array.isArray(s) ? s : []);
       setRevenueRows(Array.isArray(rv) ? rv : []);
     }).finally(() => { setLoading(false); setRefreshing(false); });
+  }, [branchId]);
+
+  useEffect(() => {
+    const onBranch = () => setBranchId(getSelectedBranchId());
+    window.addEventListener('vth_branch_changed', onBranch);
+    return () => window.removeEventListener('vth_branch_changed', onBranch);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const loadRevenue = () => {
+  const loadRevenue = useCallback(() => {
     setRevLoading(true);
-    const branchId = getSelectedBranchId();
-    getRevenueReportFiltered(revStart || undefined, revEnd || undefined, branchId)
+    getRevenueReportFiltered(revStart || undefined, revEnd || undefined, branchId !== 'all' ? branchId : undefined)
       .then((r) => setRevenueRows(Array.isArray(r.data) ? r.data : []))
       .catch(() => {})
       .finally(() => setRevLoading(false));
-  };
+  }, [revStart, revEnd, branchId]);
+
+  useEffect(() => {
+    if (activeTab === 'revenue') {
+      // Auto-load revenue data when opening the Revenue tab or changing branch
+      loadRevenue();
+    }
+  }, [activeTab, branchId, loadRevenue]);
 
   if (loading) return <Loading />;
 
@@ -163,11 +171,27 @@ export default function Reports() {
   const totalDue = Number(dashboard?.pendingPayments || 0);
   const collectionPct = totalRevenue > 0 ? Math.round((totalCollected / totalRevenue) * 100) : 0;
 
+  const branchRevenue = (dashboard?.branchRevenue || []).map((b) => ({
+    name: b.branch_name,
+    Revenue: Number(b.revenue || 0),
+  }));
+
+  const branchMetrics = (dashboard?.branchMetrics || []).map((b) => ({
+    name: b.branch_name,
+    customers: Number(b.customers || 0),
+    bookings: Number(b.bookings || 0),
+    invoices: Number(b.invoices || 0),
+    revenue: Number(b.revenue || 0),
+    collected: Number(b.collected || 0),
+    pending: Number(b.pending || 0),
+  }));
+
   const TABS = [
     { id: 'overview', label: 'Overview', icon: RiBarChartLine },
     { id: 'revenue', label: 'Revenue', icon: RiMoneyRupeeCircleLine },
     { id: 'pending', label: 'Pending Payments', icon: RiTimeLine },
     { id: 'staff', label: 'Staff', icon: RiTeamLine },
+    { id: 'branches', label: 'Branches', icon: RiMapPinLine },
   ];
 
   return (
@@ -417,6 +441,72 @@ export default function Reports() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── BRANCHES TAB ── */}
+      {activeTab === 'branches' && (
+        <div className="space-y-5">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <SectionHeader icon={RiMapPinLine} title="Branch-wise Revenue (All Branches)" />
+            {branchRevenue.length === 0 ? (
+              <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No branch data yet.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={branchRevenue} margin={{ top: 8, right: 16, left: 0, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={0} angle={-25} textAnchor="end" />
+                  <YAxis tickFormatter={fmtShort} tick={{ fontSize: 11, fill: '#94a3b8' }} width={64} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Bar dataKey="Revenue" radius={[4, 4, 0, 0]}>
+                    {branchRevenue.map((_, i) => (
+                      <Cell key={i} fill={TEAL_PALETTE[i % TEAL_PALETTE.length]} />
+                    ))}
+                  </Bar>
+                  <Legend />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-800">Branch Metrics</p>
+              <p className="text-xs text-slate-500">{branchMetrics.length} branches</p>
+            </div>
+            {branchMetrics.length === 0 ? (
+              <div className="py-10 text-center text-slate-400 text-sm">No branch metrics available.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px]">
+                  <thead>
+                    <tr className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                      <th className="text-left px-5 py-3 text-xs font-semibold uppercase">Branch</th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold uppercase">Customers</th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold uppercase">Bookings</th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold uppercase">Invoices</th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold uppercase">Revenue</th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold uppercase">Collected</th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold uppercase">Pending</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {branchMetrics.map((b) => (
+                      <tr key={b.name} className="hover:bg-teal-50/30 transition-colors">
+                        <td className="px-5 py-3 text-sm font-semibold text-slate-800">{b.name}</td>
+                        <td className="px-5 py-3 text-sm text-right text-slate-700">{b.customers}</td>
+                        <td className="px-5 py-3 text-sm text-right text-slate-700">{b.bookings}</td>
+                        <td className="px-5 py-3 text-sm text-right text-slate-700">{b.invoices}</td>
+                        <td className="px-5 py-3 text-sm text-right text-slate-800">₹{fmtShort(b.revenue)}</td>
+                        <td className="px-5 py-3 text-sm text-right text-emerald-700">₹{fmtShort(b.collected)}</td>
+                        <td className="px-5 py-3 text-sm text-right text-red-600">₹{fmtShort(b.pending)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

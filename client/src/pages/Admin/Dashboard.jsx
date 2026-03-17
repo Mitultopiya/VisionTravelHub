@@ -25,8 +25,9 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { getDashboard, getBranches } from '../../services/api';
+import { getDashboard } from '../../services/api';
 import Loading from '../../components/Loading';
+import { getSelectedBranchId, branchParams } from '../../utils/branch';
 
 function fmt(n) {
   return Number(n ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -90,19 +91,17 @@ function StatCard({ to, icon: Icon, label, value, color }) {
 export default function AdminDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState(() => {
-    if (typeof window === 'undefined') return '';
-    return localStorage.getItem('vth_selected_branch_id') || '';
-  });
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
 
   useEffect(() => {
-    getBranches().then((r) => setBranches(r.data || [])).catch(() => setBranches([]));
+    const onBranch = () => setBranchId(getSelectedBranchId());
+    window.addEventListener('vth_branch_changed', onBranch);
+    return () => window.removeEventListener('vth_branch_changed', onBranch);
   }, []);
 
   useEffect(() => {
     setLoading(true);
-    getDashboard(branchId ? { branch_id: branchId } : {})
+    getDashboard(branchParams(branchId))
       .then((r) => setData(r.data))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
@@ -110,6 +109,10 @@ export default function AdminDashboard() {
 
   if (loading && !data) return <Loading />;
   const d = data || {};
+  const branchLabel =
+    branchId === 'all'
+      ? 'All Branches'
+      : (d.branchMetrics || []).find((b) => String(b.branch_id) === String(branchId))?.branch_name || `Branch #${branchId}`;
 
   const monthlySales = (d.monthlySales || []).map((m) => ({
     month: m.month || '',
@@ -133,26 +136,7 @@ export default function AdminDashboard() {
     <div className="w-full max-w-[1600px] mx-auto space-y-4 sm:space-y-6 md:space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-slate-800">Dashboard</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-xs sm:text-sm text-slate-600 font-medium">Branch:</label>
-          <select
-            value={branchId}
-            onChange={(e) => {
-              const val = e.target.value;
-              setBranchId(val);
-              if (typeof window !== 'undefined') {
-                if (val) localStorage.setItem('vth_selected_branch_id', val);
-                else localStorage.removeItem('vth_selected_branch_id');
-              }
-            }}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 bg-white min-w-[140px] focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none"
-          >
-            {branches.map((b) => (
-              <option key={b.id} value={String(b.id)}>{b.name} ({b.code})</option>
-            ))}
-          </select>
-          <p className="text-xs sm:text-sm text-slate-500 hidden md:block">Vision Travel Hub — Financial overview</p>
-        </div>
+        <p className="text-xs sm:text-sm text-slate-500">Branch: {branchLabel}</p>
       </div>
 
       {/* Summary cards - single row on desktop */}

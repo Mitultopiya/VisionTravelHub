@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { getCompanySettings, updateCompanySettings, uploadPaymentQr, getBranches, createBranch, updateBranch, deleteBranch, uploadBaseUrl } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import Loading from '../../components/Loading';
@@ -13,8 +14,8 @@ const SETTINGS_SECTIONS = [
   { id: 'company',  label: 'Company Information', icon: RiBuildingLine },
   { id: 'bank',     label: 'Bank Details',        icon: RiBankLine },
   { id: 'payment',  label: 'Payment Settings',    icon: RiQrCodeLine },
-  { id: 'branches', label: 'Branch Management',    icon: RiMapPin2Line },
-  { id: 'preview',  label: 'PDF Preview',         icon: RiBuildingLine },
+  { id: 'branches', label: 'Branch Management',   icon: RiMapPin2Line },
+  { id: 'preview',  label: 'PDF Header Preview',  icon: RiBuildingLine },
 ];
 
 const FIELDS = {
@@ -96,14 +97,19 @@ export default function Settings() {
   const [branchSaving, setBranchSaving] = useState(false);
   const [qrUploading, setQrUploading] = useState(false);
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem("vth_selected_branch_id") || "";
-});
+    if (typeof window === 'undefined') return 'all';
+    return localStorage.getItem('vth_selected_branch_id') || 'all';
+  });
   const [settingsSection, setSettingsSection] = useState('company');
+
+  const navigate = useNavigate();
+  const { section: sectionParam } = useParams();
 
   const load = () => {
     setLoading(true);
-    const params = selectedBranchId ? { branch_id: selectedBranchId } : {};
+    const params = selectedBranchId && selectedBranchId !== 'all'
+      ? { branch_id: Number(selectedBranchId) }
+      : {};
     getCompanySettings(params)
       .then((r) => { setForm(r.data || {}); setOriginal(r.data || {}); })
       .catch(() => toast('Failed to load settings', 'error'))
@@ -121,11 +127,23 @@ export default function Settings() {
   useEffect(() => { loadBranches(); }, []);
   useEffect(() => { load(); }, [selectedBranchId]);
 
+  // Sync section from URL path (/admin/settings/:section)
+  useEffect(() => {
+    const sec = sectionParam || 'company';
+    if (SETTINGS_SECTIONS.some((s) => s.id === sec)) {
+      setSettingsSection(sec);
+    } else {
+      setSettingsSection('company');
+    }
+  }, [sectionParam]);
+
   const handleChange = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
   const handleSave = () => {
     setSaving(true);
-    const payload = selectedBranchId ? { ...form, branch_id: parseInt(selectedBranchId, 10) } : form;
+    const payload = selectedBranchId && selectedBranchId !== 'all'
+      ? { ...form, branch_id: parseInt(selectedBranchId, 10) }
+      : form;
     updateCompanySettings(payload)
       .then((r) => { setForm(r.data || form); setOriginal(r.data || form); toast('Settings saved successfully'); })
       .catch(() => toast('Failed to save settings', 'error'))
@@ -165,7 +183,9 @@ export default function Settings() {
       return;
     }
     setQrUploading(true);
-    const branchId = selectedBranchId ? parseInt(selectedBranchId, 10) : null;
+    const branchId = selectedBranchId && selectedBranchId !== 'all'
+      ? parseInt(selectedBranchId, 10)
+      : null;
     uploadPaymentQr(file, branchId)
       .then((r) => {
         const pathVal = r.data?.path;
@@ -201,12 +221,12 @@ export default function Settings() {
               const val = e.target.value;
               setSelectedBranchId(val);
               if (typeof window !== 'undefined') {
-                if (val) localStorage.setItem('vth_selected_branch_id', val);
-                else localStorage.removeItem('vth_selected_branch_id');
+                localStorage.setItem('vth_selected_branch_id', val);
               }
             }}
             className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 bg-white min-w-[160px] focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none"
           >
+            <option value="all">All Branches</option>
             {branches.map((b) => (
               <option key={b.id} value={String(b.id)}>{b.name} ({b.code})</option>
             ))}
@@ -216,7 +236,11 @@ export default function Settings() {
           <label className="text-sm font-medium text-slate-600 whitespace-nowrap">Section:</label>
           <select
             value={settingsSection}
-            onChange={(e) => setSettingsSection(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSettingsSection(val);
+              navigate(`/admin/settings/${val}`, { replace: true });
+            }}
             className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 bg-white min-w-[180px] focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none"
           >
             {SETTINGS_SECTIONS.map((s) => (
@@ -224,9 +248,6 @@ export default function Settings() {
             ))}
           </select>
         </div>
-        {selectedBranchId && (
-          <p className="text-xs text-slate-500 self-center">Editing settings for this branch only</p>
-        )}
       </div>
 
       {/* Save bar (when form section and dirty) */}

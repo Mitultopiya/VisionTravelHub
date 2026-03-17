@@ -1,15 +1,11 @@
 import { useState, useEffect } from 'react';
-import { getHotels, getCities, createHotel, updateHotel, deleteHotel } from '../../../services/api';
+import { getHotels, getCities, createHotel, updateHotel, deleteHotel, getBranches } from '../../../services/api';
 import Loading from '../../../components/Loading';
 import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
 import Modal from '../../../components/ui/Modal';
 import { useToast } from '../../../context/ToastContext';
-
-const getSelectedBranchId = () => {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('vth_selected_branch_id') || '';
-};
+import { getSelectedBranchId, branchParams } from '../../../utils/branch';
 
 export default function Hotels() {
   const { toast } = useToast();
@@ -17,6 +13,8 @@ export default function Hotels() {
   const [cities, setCities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, data: null });
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
 
   const monthNames = [
     'January',
@@ -39,6 +37,7 @@ export default function Hotels() {
   }, {});
 
   const [form, setForm] = useState({
+    branch_id: '',
     name: '',
     city_id: '',
     address: '',
@@ -55,17 +54,23 @@ export default function Hotels() {
 
   const load = () => {
     setLoading(true);
-    const branchId = getSelectedBranchId();
-    const params = branchId ? { branch_id: branchId } : undefined;
+    const params = branchParams(branchId);
     Promise.all([getHotels(params), getCities(params)]).then(([h, c]) => {
       setList(h.data || []);
       setCities(c.data || []);
     }).finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [branchId]);
+  useEffect(() => {
+    getBranches().then((r) => setBranches(r.data || [])).catch(() => setBranches([]));
+    const onBranch = () => setBranchId(getSelectedBranchId());
+    window.addEventListener('vth_branch_changed', onBranch);
+    return () => window.removeEventListener('vth_branch_changed', onBranch);
+  }, []);
 
   const openAdd = () => {
     setForm({
+      branch_id: branchId !== 'all' ? String(branchId) : '',
       name: '',
       city_id: '',
       address: '',
@@ -97,6 +102,7 @@ export default function Hotels() {
       });
     }
     setForm({
+      branch_id: row.branch_id ? String(row.branch_id) : (branchId !== 'all' ? String(branchId) : ''),
       name: row.name || '',
       city_id: row.city_id ?? '',
       address: row.address || '',
@@ -115,7 +121,6 @@ export default function Hotels() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setSaving(true);
-    const branchId = getSelectedBranchId();
     const contactCombined = form.contact_person || form.contact_mobile
       ? `${form.contact_person || ''}|${form.contact_mobile || ''}`
       : form.contact || '';
@@ -130,7 +135,7 @@ export default function Hotels() {
       city_id: form.city_id ? Number(form.city_id) : null,
       price: finalPrice || null,
       month_prices: form.month_prices,
-      ...(branchId ? { branch_id: Number(branchId) } : {}),
+      branch_id: form.branch_id ? Number(form.branch_id) : undefined,
     };
     (modal.data ? updateHotel(modal.data.id, payload) : createHotel(payload))
       .then(() => { toast(modal.data ? 'Hotel updated' : 'Hotel added'); setModal({ open: false, data: null }); load(); })
@@ -185,6 +190,9 @@ export default function Hotels() {
                           Name
                         </th>
                         <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                          Branch
+                        </th>
+                        <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
                           Room Type
                         </th>
                         <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
@@ -203,6 +211,9 @@ export default function Hotels() {
                         <tr key={row.id} className="hover:bg-teal-50/40 transition-colors">
                           <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">
                             {row.name || '-'}
+                          </td>
+                          <td className="px-5 py-3.5 text-sm text-slate-600">
+                            {row.branch_name || '-'}
                           </td>
                           <td className="px-5 py-3.5 text-sm text-slate-600">
                             {row.room_type || '-'}
@@ -246,6 +257,18 @@ export default function Hotels() {
       </div>
       <Modal open={modal.open} onClose={() => setModal({ open: false, data: null })} title={modal.data ? 'Edit Hotel' : 'Add Hotel'} size="lg">
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Branch *</label>
+            <select
+              value={form.branch_id || (branchId !== 'all' ? String(branchId) : '')}
+              onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+              required
+            >
+              <option value="">— Select Branch —</option>
+              {branches.map((b) => <option key={b.id} value={String(b.id)}>{b.name} ({b.code})</option>)}
+            </select>
+          </div>
           <Input label="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
