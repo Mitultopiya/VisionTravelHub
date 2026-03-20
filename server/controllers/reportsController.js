@@ -1,11 +1,18 @@
 import pool from '../config/db.js';
 
+function resolveBranchId(req) {
+  // If UI explicitly requests all branches, DO NOT apply token branch scope.
+  if (req.query.branch_id != null && String(req.query.branch_id) === 'all') return null;
+  if (req.query.branch_id != null && String(req.query.branch_id) !== '') {
+    const parsed = parseInt(req.query.branch_id, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return req.branchId ?? null;
+}
+
 export const dashboard = async (req, res) => {
   try {
-    const branchId =
-      req.query.branch_id && String(req.query.branch_id) !== 'all'
-        ? parseInt(req.query.branch_id, 10)
-        : (req.branchId ?? null);
+    const branchId = resolveBranchId(req);
     const invAnd = branchId ? ' AND branch_id = $1' : '';
     const invWhere = branchId ? ' WHERE branch_id = $1' : '';
     const invAliasAnd = branchId ? ' AND i.branch_id = $1' : '';
@@ -241,10 +248,7 @@ export const revenueReport = async (req, res) => {
 
 export const pendingPayments = async (req, res) => {
   try {
-    const branchId =
-      req.query.branch_id && String(req.query.branch_id) !== 'all'
-        ? parseInt(req.query.branch_id, 10)
-        : (req.branchId ?? null);
+    const branchId = resolveBranchId(req);
     const params = [];
     const branchAnd = branchId && Number.isFinite(branchId) ? ` AND i.branch_id = $1` : '';
     if (branchAnd) params.push(branchId);
@@ -269,15 +273,13 @@ export const pendingPayments = async (req, res) => {
 
 export const staffPerformance = async (req, res) => {
   try {
-    const branchId =
-      req.query.branch_id && String(req.query.branch_id) !== 'all'
-        ? parseInt(req.query.branch_id, 10)
-        : (req.branchId ?? null);
+    const branchId = resolveBranchId(req);
     const params = [];
     let where = `WHERE u.role IN ('manager','staff')`;
     if (branchId && Number.isFinite(branchId)) { params.push(branchId); where += ` AND u.branch_id = $${params.length}`; }
     const result = await pool.query(
-      `SELECT u.id, u.name, u.email, u.branch_id, br.name as branch_name,
+      `SELECT u.id, u.name, u.email, u.branch_id,
+              COALESCE(br.name, NULLIF(u.branch, ''), '-') as branch_name,
               COUNT(bk.id) FILTER (WHERE bk.status IN ('confirmed','ongoing','completed')) as completed_count,
               COUNT(bk.id) FILTER (WHERE bk.status = 'cancelled') as cancelled_count
        FROM users u

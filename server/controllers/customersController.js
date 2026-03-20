@@ -1,13 +1,20 @@
 import pool from '../config/db.js';
 
+function resolveBranchId(req) {
+  if (req.query.branch_id != null && String(req.query.branch_id) === 'all') return null;
+  const branch_id = req.query.branch_id;
+  if (branch_id != null && String(branch_id) !== '') {
+    const parsed = parseInt(branch_id, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return req.branchId ?? null;
+}
+
 export const list = async (req, res) => {
   try {
     const { search, page = 1, limit = 20, branch_id } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
-    const branchId =
-      branch_id && String(branch_id) !== 'all'
-        ? parseInt(branch_id, 10)
-        : (req.branchId ?? null);
+    const branchId = resolveBranchId(req);
     let where = '';
     const params = [];
     if (branchId && Number.isFinite(branchId)) {

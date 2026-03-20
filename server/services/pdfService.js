@@ -6,17 +6,23 @@ import pool from '../config/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Load company settings from DB, fall back to defaults if table not ready */
-async function getCompanySettings() {
+/** Load company settings; if branchId set, branch_settings override company_settings */
+async function getCompanySettings(branchId = null) {
   try {
-    const result = await pool.query('SELECT key, value FROM company_settings');
+    const global = await pool.query('SELECT key, value FROM company_settings');
     const s = {};
-    result.rows.forEach((r) => { s[r.key] = r.value || ''; });
+    global.rows.forEach((r) => { s[r.key] = r.value || ''; });
+
+    const bid = branchId != null ? parseInt(branchId, 10) : null;
+    if (bid) {
+      const branch = await pool.query('SELECT key, value FROM branch_settings WHERE branch_id = $1', [bid]);
+      branch.rows.forEach((r) => { s[r.key] = r.value || ''; });
+    }
     return {
       name:    s.company_name    || 'Vision Travel Hub',
-      address: s.company_address || '1234 Street, City, State, Zip Code',
-      phone:   s.company_phone   || '123-123-1234',
-      email:   s.company_email   || 'yourcompany@email.com',
+      address: s.company_address || '502, Sector 16, Rohini, New Delhi, Delhi, 110085',
+      phone:   s.company_phone   || '8976589345',
+      email:   s.company_email   || 'visiontravel@email.com',
       gst:     s.company_gst     || '',
       bankName:   s.bank_name    || '',
       accountNumber: s.bank_account || '',
@@ -28,8 +34,8 @@ async function getCompanySettings() {
     };
   } catch (_) {
     return {
-      name: 'Vision Travel Hub', address: '1234 Street, City, State, Zip Code',
-      phone: '123-123-1234', email: 'yourcompany@email.com', gst: '',
+      name: 'Vision Travel Hub', address: '502, Sector 16, Rohini, New Delhi, Delhi, 110085',
+      phone: '8976589345', email: 'visiontravel@email.com', gst: '',
       bankName: '', accountNumber: '', ifsc: '', upi: '', upiName: '', upiQrPath: '', bankBranch: '',
     };
   }
@@ -346,11 +352,13 @@ const TERMS_PDF = [
 // Use ASCII "Rs." in PDF (StandardFonts do not support Unicode rupee symbol). Avoid locale to prevent 500 in some envs.
 function pdfAmount(n) {
   const num = Number(n);
-  if (Number.isNaN(num)) return 'Rs.0';
-  const fixed = num.toFixed(2);
+  if (Number.isNaN(num)) return 'Rs.0.00';
+  const neg = num < 0;
+  const fixed = Math.abs(num).toFixed(2);
   const [intPart, decPart] = fixed.split('.');
   const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `Rs.${withCommas}${decPart ? '.' + decPart : ''}`;
+  const body = `Rs.${withCommas}.${decPart || '00'}`;
+  return neg ? `-${body}` : body;
 }
 
 // Strip to ASCII so pdf-lib StandardFonts don't throw (WinAnsi encoding only)
@@ -666,19 +674,471 @@ function amountInWords(n) {
   return 'Rupees ' + toWords(num) + ' Only';
 }
 
+function formatInvoicePdfDate(v) {
+  if (v == null || v === '') return '-';
+  const d = v instanceof Date ? v : new Date(v);
+  if (Number.isNaN(d.getTime())) {
+    const s = String(v).slice(0, 10);
+    return s;
+  }
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}-${mm}-${d.getFullYear()}`;
+}
+
+function invoicePaymentModeLabel(mode) {
+  const m = String(mode || '').toLowerCase();
+  if (m === 'bank') return 'Bank Transfer';
+  if (m === 'upi') return 'UPI';
+  if (m === 'cash') return 'Cash';
+  if (m === 'card') return 'Card';
+  return asciiOnly(String(mode || '-'));
+}
+
+function htmlEscape(s) {
+  if (s == null || s === '') return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function htmlRupeeAmount(n) {
+  const num = Number(n);
+  if (Number.isNaN(num)) return '₹0.00';
+  const neg = num < 0;
+  const fixed = Math.abs(num).toFixed(2);
+  const [intPart, decPart] = fixed.split('.');
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const body = `₹${withCommas}.${decPart || '00'}`;
+  return neg ? `-${body}` : body;
+}
+
+function guessImageMime(ext) {
+  const e = String(ext || '').toLowerCase();
+  if (e === '.png') return 'image/png';
+  if (e === '.jpg' || e === '.jpeg') return 'image/jpeg';
+  if (e === '.webp') return 'image/webp';
+  if (e === '.svg') return 'image/svg+xml';
+  return 'application/octet-stream';
+}
+
+function buildLogoImgHtml() {
+  try {
+    const baseDir = path.join(__dirname, '..', '..');
+    const candidates = [
+      path.join(baseDir, 'client', 'public', 'logo.png'),
+      path.join(baseDir, 'client', 'public', 'logo.jpg'),
+      path.join(baseDir, 'client', 'public', 'logo.jpeg'),
+      path.join(baseDir, 'client', 'public', 'Vision_JPG_Logo.png'),
+      path.join(baseDir, 'client', 'public', 'Vision JPG Logo.JPG'),
+    ];
+
+    const logoPath = candidates.find((p) => p && fs.existsSync(p));
+    const alt = 'Logo';
+
+    if (logoPath) {
+      const buf = fs.readFileSync(logoPath);
+      const ext = path.extname(logoPath);
+      const mime = guessImageMime(ext);
+      const b64 = buf.toString('base64');
+      return `<img class="logo" src="data:${mime};base64,${b64}" alt="${alt}">`;
+    }
+
+    // Always show a clean placeholder logo if none is configured
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">` +
+      `<rect x="6" y="6" width="148" height="148" rx="18" fill="#2E5BFF"/>` +
+      `<text x="80" y="92" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700" text-anchor="middle" fill="#ffffff">LOGO</text>` +
+      `</svg>`;
+    const b64 = Buffer.from(svg, 'utf8').toString('base64');
+    return `<img class="logo" src="data:image/svg+xml;base64,${b64}" alt="${alt}">`;
+  } catch (_) {
+    return '';
+  }
+}
+
+function htmlNumberFormatted(n) {
+  const num = Number(n);
+  if (Number.isNaN(num)) return '0.00';
+  const fixed = Math.abs(num).toFixed(2);
+  const [intPart, decPart] = fixed.split('.');
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${withCommas}.${decPart || '00'}`;
+}
+
+function splitInvoiceItemDescription(desc) {
+  const d = String(desc || '').trim();
+  if (!d) return { title: '-', detail: '' };
+  const n = d.indexOf('\n');
+  if (n === -1) return { title: d, detail: '' };
+  return { title: d.slice(0, n).trim() || '-', detail: d.slice(n + 1).trim() };
+}
+
+function twoLineAddressHtmlFromParts(parts) {
+  const clean = (Array.isArray(parts) ? parts : []).map((p) => String(p || '').trim()).filter(Boolean);
+  if (!clean.length) return '-';
+  if (clean.length <= 2) return clean.map(htmlEscape).join('<br>');
+  const mid = Math.ceil(clean.length / 2);
+  const l1 = clean.slice(0, mid).join(', ');
+  const l2 = clean.slice(mid).join(', ');
+  return [l1, l2].filter(Boolean).map(htmlEscape).join('<br>');
+}
+
+function buildInvoiceDocHtml(template, ctx) {
+  const repl = {
+    INV_REF: htmlEscape(ctx.invRef),
+    STATUS: htmlEscape(ctx.statusLine),
+    LOGO_IMG_HTML: ctx.logoImgHtml || '',
+    COMPANY_NAME: htmlEscape(ctx.companyName),
+    COMPANY_ADDRESS_HTML: ctx.companyAddressHtml,
+    COMPANY_PHONE: htmlEscape(ctx.companyPhone),
+    COMPANY_EMAIL_LINE: ctx.companyEmailLine || '',
+    COMPANY_GST_LINE: ctx.companyGstLine || '',
+    BILL_TO: htmlEscape(ctx.billTo),
+    INVOICE_DATE: htmlEscape(ctx.invDateStr),
+    DUE_DATE: htmlEscape(ctx.dueDateStr),
+    SALE_AGENT: htmlEscape(ctx.agentStr),
+    ITEM_ROWS: ctx.itemRowsHtml,
+    SUB_TOTAL: htmlRupeeAmount(ctx.subtotal),
+    DISCOUNT_LINE: ctx.discountLineHtml,
+    ADJUSTMENT: htmlRupeeAmount(ctx.adjustment),
+    TOTAL: htmlRupeeAmount(ctx.total),
+    TOTAL_PAID: htmlRupeeAmount(-Math.abs(ctx.paid)),
+    AMOUNT_DUE: htmlRupeeAmount(ctx.due),
+    TRANSACTION_ROWS: ctx.transactionRowsHtml,
+    OFFLINE_PAYMENT_HTML: ctx.offlinePaymentHtml,
+    BANK_DETAILS_HTML: ctx.bankDetailsHtml || '',
+    TERMS_HTML: ctx.termsHtml || '',
+  };
+  let out = template;
+  for (const [k, v] of Object.entries(repl)) {
+    out = out.split(`{{${k}}}`).join(v);
+  }
+  return out;
+}
+
+function resolveChromeExecutablePath() {
+  const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN;
+  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+
+  const candidates = [];
+  if (process.platform === 'darwin') {
+    candidates.push(
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+    );
+  } else if (process.platform === 'win32') {
+    const pf = process.env.PROGRAMFILES || 'C:\\\\Program Files';
+    const pf86 = process.env['PROGRAMFILES(X86)'] || 'C:\\\\Program Files (x86)';
+    const local = process.env.LOCALAPPDATA;
+    candidates.push(
+      path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      local ? path.join(local, 'Google', 'Chrome', 'Application', 'chrome.exe') : ''
+    );
+  } else {
+    candidates.push(
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium'
+    );
+  }
+
+  for (const p of candidates.filter(Boolean)) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch (_) {}
+  }
+  return null;
+}
+
+// Reuse a single Puppeteer browser for faster PDF generation (avoids 2-3s launch per click)
+let _sharedBrowserPromise = null;
+async function getSharedPuppeteerBrowser(puppeteer, executablePath) {
+  try {
+    if (_sharedBrowserPromise) {
+      const b = await _sharedBrowserPromise;
+      if (b && b.isConnected && b.isConnected()) return b;
+      _sharedBrowserPromise = null;
+    }
+
+    _sharedBrowserPromise = puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      headless: 'new',
+      ...(executablePath ? { executablePath } : {}),
+    });
+
+    const browser = await _sharedBrowserPromise;
+
+    // Best-effort cleanup on process exit (do not block shutdown)
+    if (!globalThis.__vthPuppeteerCleanupBound) {
+      globalThis.__vthPuppeteerCleanupBound = true;
+      const cleanup = async () => {
+        try {
+          const b = await _sharedBrowserPromise;
+          await b?.close?.();
+        } catch (_) {}
+        _sharedBrowserPromise = null;
+      };
+      process.on('exit', cleanup);
+      process.on('SIGINT', () => { cleanup().finally(() => process.exit(0)); });
+      process.on('SIGTERM', () => { cleanup().finally(() => process.exit(0)); });
+    }
+
+    return browser;
+  } catch (_) {
+    _sharedBrowserPromise = null;
+    return null;
+  }
+}
+
+// Pre-warm the browser once so the first PDF download is fast too
+setTimeout(async () => {
+  try {
+    const { default: puppeteer } = await import('puppeteer');
+    const executablePath = resolveChromeExecutablePath();
+    await getSharedPuppeteerBrowser(puppeteer, executablePath);
+  } catch (_) {
+    // ignore (Puppeteer/Chrome not available)
+  }
+}, 0);
+
 /**
- * Invoice PDF – same structure/layout as quotation PDF
+ * Invoice PDF – HTML layout (download) matches structured invoice; falls back to pdf-lib if Puppeteer unavailable.
  */
-export async function generateInvoiceDocPDF(invoice, customer = {}, items = [], payments = []) {
+export async function generateInvoiceDocPDF(invoice, customer = {}, items = [], payments = [], saleAgentName = '') {
   invoice = invoice || {};
   customer = customer || {};
   items = Array.isArray(items) ? items : [];
+  payments = Array.isArray(payments) ? payments : [];
 
-  const COMPANY_PDF = await getCompanySettings();
+  const COMPANY_PDF = await getCompanySettings(invoice.branch_id || null);
   const BANK_PDF = COMPANY_PDF;
 
+  const subtotal = Number(invoice.subtotal) || 0;
+  const discountVal = Number(invoice.discount || 0);
+  const taxPct = Number(invoice.tax_percent || 0);
+  const total = Number(invoice.total || 0);
+  const serviceCharges = Number(invoice.service_charges || 0);
+  const roundOff = Number(invoice.round_off || 0);
+  const adjustment = serviceCharges + roundOff;
+  const paid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const due = Math.max(0, total - paid);
+
+  let discountPctLabel = '0';
+  if (invoice.discount_type === 'percent' && discountVal > 0) {
+    discountPctLabel = String(discountVal);
+  } else if (subtotal > 0 && discountVal > 0) {
+    discountPctLabel = ((discountVal / subtotal) * 100).toFixed(2);
+  }
+
+  const invRef = String(invoice.invoice_number || `INV-${String(Number(invoice.id || 0)).padStart(6, '0')}`).trim() || '-';
+  const statusLine = String(invoice.status || 'draft')
+    .replace(/_/g, ' ')
+    .toUpperCase();
+  const billTo = customer.name || invoice.customer_name || '-';
+  const invDateStr = formatInvoicePdfDate(invoice.invoice_date);
+  const dueDateStr = formatInvoicePdfDate(invoice.due_date);
+  const agentStr = saleAgentName || '-';
+
+  const realItems = items.filter((it) => {
+    if (!it) return false;
+    const desc = String(it.description || '').trim();
+    if (!desc && !Number(it.amount)) return false;
+    // Keep markup in totals, but do not show as a separate row in PDF table.
+    if (desc.toLowerCase() === 'markup') return false;
+    return true;
+  });
+
+  const stripPlaceholderAddressParts = (parts) => {
+    const bad = new Set(['city', 'state', 'zip', 'zipcode', 'zip code', 'pin', 'pincode', 'pin code']);
+    return (Array.isArray(parts) ? parts : [])
+      .map((p) => String(p || '').trim())
+      .filter(Boolean)
+      .filter((p) => !bad.has(p.toLowerCase()));
+  };
+
+  const addrPartsRawHtml = String(COMPANY_PDF.address || '').split(/[\n,]+/);
+  const addrPartsCleanHtml = stripPlaceholderAddressParts(addrPartsRawHtml);
+  const companyAddressHtml = twoLineAddressHtmlFromParts(addrPartsCleanHtml);
+
+  const companyEmail = (COMPANY_PDF.email || '').trim();
+  const companyEmailLine = companyEmail ? ` &nbsp;|&nbsp; ${htmlEscape(companyEmail)}` : '';
+  const companyGst = (COMPANY_PDF.gst || '').trim();
+  const companyGstLine = companyGst ? `<div class="muted">GST No.: ${htmlEscape(companyGst)}</div>` : '';
+
+  let itemRowsHtml = '';
+  if (!realItems.length) {
+    itemRowsHtml =
+      '<tr><td colspan="6" style="text-align:center;padding:20px;color:#666;">No line items</td></tr>';
+  } else {
+    itemRowsHtml = realItems
+      .map((it, i) => {
+        const qty = Number(it.quantity || 1);
+        const rateVal = Number(it.rate || (qty ? Number(it.amount || 0) / qty : it.amount || 0));
+        const amt = Number(it.amount || 0);
+        const { title, detail } = splitInvoiceItemDescription(it.description);
+        const detailHtml = detail
+          ? `<span class="item-desc">${htmlEscape(detail).split(/\n/).join('<br>')}</span>`
+          : '';
+        return `<tr>
+        <td class="idx">${i + 1}</td>
+        <td><span class="item-title">${htmlEscape(title)}</span>${detailHtml ? `<br>${detailHtml}` : ''}</td>
+        <td class="qty">${htmlEscape(String(qty))}</td>
+        <td class="rate">${htmlNumberFormatted(rateVal)}</td>
+        <td class="tax">${htmlEscape(String(taxPct))}%</td>
+        <td class="amt">${htmlRupeeAmount(amt)}</td>
+      </tr>`;
+      })
+      .join('');
+  }
+
+  const discountLineHtml = `Discount (${discountPctLabel}%) ${htmlRupeeAmount(-Math.abs(discountVal))}`;
+
+  let transactionRowsHtml = '';
+  if (!payments.length) {
+    transactionRowsHtml =
+      '<tr><td colspan="4" style="text-align:center;padding:14px;color:#666;">No payments recorded</td></tr>';
+  } else {
+    transactionRowsHtml = payments
+      .map((p, idx) => {
+        const pid = p.id != null ? String(p.id) : String(idx + 1);
+        return `<tr>
+        <td>${htmlEscape(pid)}</td>
+        <td>${htmlEscape(invoicePaymentModeLabel(p.mode))}</td>
+        <td>${htmlEscape(formatInvoicePdfDate(p.paid_at))}</td>
+        <td class="amt">${htmlRupeeAmount(p.amount)}</td>
+      </tr>`;
+      })
+      .join('');
+  }
+
+  const offlinePaymentHtml = [
+    htmlEscape(BANK_PDF.bankName || 'Bank Transfer'),
+    'Account Type: Current',
+    `Account Number: ${htmlEscape(BANK_PDF.accountNumber || '-')}`,
+    `Account Holder Name: ${htmlEscape(COMPANY_PDF.name || '-')}`,
+    `IFSC Code: ${htmlEscape(BANK_PDF.ifsc || '-')}`,
+  ].join('<br>');
+
+  const bankRows = [
+    ['Bank Name', BANK_PDF.bankName || '-'],
+    ['Branch', BANK_PDF.bankBranch || '-'],
+    ['Account Number', BANK_PDF.accountNumber || '-'],
+    ['IFSC', BANK_PDF.ifsc || '-'],
+    ['UPI Name', BANK_PDF.upiName || '-'],
+    ['UPI ID', BANK_PDF.upi || '-'],
+  ];
+  const bankDetailsHtml =
+    `<table class="bank-table">` +
+    bankRows
+      .filter(([, v]) => String(v || '').trim() && String(v).trim() !== '-')
+      .map(([k, v]) => `<tr><td class="lbl">${htmlEscape(k)}</td><td>${htmlEscape(v)}</td></tr>`)
+      .join('') +
+    `</table>`;
+
+  const termsSource =
+    invoice?.terms_text ??
+    invoice?.terms ??
+    invoice?.terms_and_conditions ??
+    invoice?.termsConditions ??
+    '';
+  const manualTerms = String(termsSource || '')
+    .split(/\r?\n/)
+    .map((s) => htmlEscape(String(s || '').trim()))
+    .filter(Boolean);
+  const termsArr = manualTerms.length ? manualTerms : (Array.isArray(TERMS_PDF) ? TERMS_PDF.map(htmlEscape) : [htmlEscape(String(TERMS_PDF || ''))]);
+  const termsHtml =
+    `<ol class="terms-list">` +
+    termsArr.map((t) => `<li>${t}</li>`).join('') +
+    `</ol>`;
+
+  // Terms for pdf-lib fallback (keep as plain text, not HTML-escaped)
+  const manualTermsPdf = String(termsSource || '')
+    .split(/\r?\n/)
+    .map((s) => asciiOnly(String(s || '').trim()))
+    .filter(Boolean);
+  const termsArrPdf = manualTermsPdf.length
+    ? manualTermsPdf
+    : (Array.isArray(TERMS_PDF) ? TERMS_PDF.map((s) => asciiOnly(String(s))) : [asciiOnly(String(TERMS_PDF || ''))]);
+
+  const logoImgHtml = buildLogoImgHtml();
+
+  const invoiceTemplatePath = path.join(__dirname, '..', 'templates', 'invoice_doc.html');
+  let htmlOut = '';
+  if (fs.existsSync(invoiceTemplatePath)) {
+    const tpl = fs.readFileSync(invoiceTemplatePath, 'utf8');
+    htmlOut = buildInvoiceDocHtml(tpl, {
+      invRef,
+      statusLine,
+      logoImgHtml,
+      companyName: COMPANY_PDF.name || 'Company',
+      companyAddressHtml,
+      companyPhone: COMPANY_PDF.phone || '-',
+      companyEmailLine,
+      companyGstLine,
+      billTo,
+      invDateStr,
+      dueDateStr,
+      agentStr,
+      itemRowsHtml,
+      subtotal,
+      discountLineHtml,
+      adjustment,
+      total,
+      paid,
+      due,
+      transactionRowsHtml,
+      offlinePaymentHtml,
+      bankDetailsHtml,
+      termsHtml,
+    });
+  }
+
+  try {
+    if (htmlOut) {
+      const { default: puppeteer } = await import('puppeteer');
+      const executablePath = resolveChromeExecutablePath();
+      const browser = await getSharedPuppeteerBrowser(puppeteer, executablePath);
+      if (!browser) throw new Error('Puppeteer browser unavailable');
+      try {
+        const page = await browser.newPage();
+        await page.setContent(htmlOut, { waitUntil: 'load', timeout: 60000 });
+        await page.emulateMediaType('screen');
+        const pdfBuffer = await page.pdf({
+          format: 'A4',
+          printBackground: true,
+          margin: { top: '10px', right: '14px', bottom: '38px', left: '14px' },
+          displayHeaderFooter: true,
+          footerTemplate:
+            '<div style="width:100%;font-size:11px;color:#777;font-family:Arial,sans-serif;text-align:center;padding-bottom:10px;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+        });
+        await page.close();
+        return Buffer.from(pdfBuffer);
+      } catch (e) {
+        // If the shared browser crashed, reset so next request relaunches
+        _sharedBrowserPromise = null;
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('Invoice HTML PDF page error:', e?.message || e);
+        }
+      }
+    }
+  } catch (e) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Invoice HTML PDF failed:', e?.message || e);
+      if (e?.stack) console.error(e.stack);
+    }
+  }
+
+  const invNo = asciiOnly(invRef);
+  const billName = asciiOnly(billTo);
+  const agentStrPdf = asciiOnly(agentStr);
+
   const doc = await PDFDocument.create();
-  const page = doc.addPage([595, 842]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
 
@@ -687,319 +1147,289 @@ export async function generateInvoiceDocPDF(invoice, customer = {}, items = [], 
   const margin = 50;
   const left = margin;
   const right = pageWidth - margin;
-  const boxBorder = rgb(0.68, 0.68, 0.68);
-  const textDark = rgb(0.12, 0.12, 0.12);
-  const textW = (t, s, f = font) => f.widthOfTextAtSize(asciiOnly(t), s);
-  const drawRight = (t, x, yPos, s = 10, f = fontBold) => {
-    const safe = asciiOnly(t);
-    page.drawText(safe, { x: x - textW(safe, s, f), y: yPos, size: s, font: f, color: textDark });
-  };
+  const boxBorder = rgb(0.72, 0.72, 0.72);
+  const textDark = rgb(0.1, 0.1, 0.1);
+  const footerY = 34;
+  const minY = 72;
 
-  // Logo (same as quotation)
-  let logoImage;
-  try {
-    const baseDir = path.join(__dirname, '..', '..');
-    const pngPath = path.join(baseDir, 'client', 'public', 'Vision_JPG_Logo.png');
-    const jpgPath = path.join(baseDir, 'client', 'public', 'Vision JPG Logo.JPG');
-    if (fs.existsSync(pngPath)) {
-      const buf = fs.readFileSync(pngPath);
-      try {
-        logoImage = await doc.embedPng(buf);
-      } catch (_) {
-        logoImage = await doc.embedJpg(buf);
-      }
-    } else if (fs.existsSync(jpgPath)) {
-      logoImage = await doc.embedJpg(fs.readFileSync(jpgPath));
-    }
-  } catch (_) {
-    logoImage = null;
-  }
+  const colNum = left + 8;
+  const colItemL = left + 28;
+  const colItemR = left + 268;
+  const colQty = left + 278;
+  const colRateR = left + 330;
+  const colTaxR = left + 382;
+  const colAmtR = right - 8;
+  const itemColW = colItemR - colItemL;
 
-  let y = pageHeight - 86;
-
-  // Title + company block (aligned with quotation)
-  page.drawText('INVOICE', { x: left, y, size: 28, font: fontBold, color: textDark });
-  y -= 34;
-  page.drawText(asciiOnly(COMPANY_PDF.name || 'YOUR COMPANY'), { x: left, y, size: 11, font: fontBold, color: textDark });
-  y -= 16;
-  page.drawText(asciiOnly(COMPANY_PDF.address), { x: left, y, size: 9.5, font, color: textDark });
-  y -= 13;
-  page.drawText(asciiOnly(COMPANY_PDF.phone), { x: left, y, size: 9.5, font, color: textDark });
-  y -= 13;
-  page.drawText(asciiOnly(COMPANY_PDF.email), { x: left, y, size: 9.5, font, color: textDark });
-
-  const logoCenterX = right - 55;
-  const logoCenterY = pageHeight - 130;
-  if (logoImage) {
-    const maxSide = 76;
-    const fitScale = Math.min(maxSide / logoImage.width, maxSide / logoImage.height);
-    const imgW = logoImage.width * fitScale;
-    const imgH = logoImage.height * fitScale;
-    page.drawImage(logoImage, {
-      x: logoCenterX - imgW / 2,
-      y: logoCenterY - imgH / 2,
-      width: imgW,
-      height: imgH,
-    });
-  } else {
-    page.drawText('YOUR', { x: logoCenterX - 20, y: logoCenterY + 20, size: 8.5, font: fontBold, color: textDark });
-    page.drawText('LOGO', { x: logoCenterX - 22, y: logoCenterY + 5, size: 8.5, font: fontBold, color: textDark });
-    page.drawText('HERE', { x: logoCenterX - 20, y: logoCenterY - 10, size: 8.5, font: fontBold, color: textDark });
-  }
-
-  // Info box – same geometry as quotation
-  const infoTop = pageHeight - 230;
-  const infoHeight = 38;
-  page.drawRectangle({ x: left, y: infoTop - infoHeight, width: right - left, height: infoHeight, borderColor: boxBorder, borderWidth: 1 });
-  page.drawLine({ start: { x: left, y: infoTop - 19 }, end: { x: right, y: infoTop - 19 }, thickness: 1, color: boxBorder });
-  page.drawLine({ start: { x: left + (right - left) / 2, y: infoTop }, end: { x: left + (right - left) / 2, y: infoTop - infoHeight }, thickness: 1, color: boxBorder });
-
-  const invNo = asciiOnly(invoice.invoice_number || ('INV-' + String(Number(invoice.id || 0)).padStart(6, '0')));
-  const invDate = toPdfText(invoice.invoice_date);
-  const dueDate = invoice.due_date != null
-    ? (invoice.due_date instanceof Date ? invoice.due_date.toISOString().slice(0, 10) : String(invoice.due_date).slice(0, 10))
-    : '-';
-
-  page.drawText('Invoice No.: ' + invNo, { x: left + 6, y: infoTop - 13, size: 10, font: fontBold, color: textDark });
-  page.drawText('Invoice Date: ' + invDate, { x: left + (right - left) / 2 + 6, y: infoTop - 13, size: 10, font: fontBold, color: textDark });
-  page.drawText('GST No.: ' + asciiOnly(invoice.company_gst || COMPANY_PDF.gst || '-'), { x: left + 6, y: infoTop - 32, size: 10, font: fontBold, color: textDark });
-  page.drawText('Due Date: ' + dueDate, { x: left + (right - left) / 2 + 6, y: infoTop - 32, size: 10, font: fontBold, color: textDark });
-
-  // Customer details – same block as quotation
-  const custTop = infoTop - 54;
-  const custHeight = 74;
-  page.drawRectangle({ x: left, y: custTop - custHeight, width: right - left, height: custHeight, borderColor: boxBorder, borderWidth: 1 });
-  page.drawLine({ start: { x: left, y: custTop - 25 }, end: { x: right, y: custTop - 25 }, thickness: 1, color: boxBorder });
-  page.drawText('Customer Details', { x: left + (right - left) / 2 - 45, y: custTop - 17, size: 11, font: fontBold, color: textDark });
-
-  const customerName = asciiOnly(customer.name || invoice.customer_name || '-');
-  const customerEmail = asciiOnly(customer.email || '-');
-  const customerMobile = asciiOnly(customer.mobile || '-');
-  const addressText = asciiOnly(customer.address || invoice.billing_address || '-');
-  const addressLines = addressText.match(/.{1,48}(\s|$)/g) || [addressText];
-
-  page.drawText('Name: ' + customerName, { x: left + 6, y: custTop - 39, size: 10, font: fontBold, color: textDark });
-  page.drawText('Address: ' + (addressLines[0] || '-').trim(), { x: left + 6, y: custTop - 55, size: 10, font: fontBold, color: textDark });
-  page.drawText('Email: ' + customerEmail, { x: left + 6, y: custTop - 71, size: 10, font: fontBold, color: textDark });
-  page.drawText('Phone: ' + customerMobile, { x: left + (right - left) / 2 + 6, y: custTop - 71, size: 10, font: fontBold, color: textDark });
-
-  // Items table – same structure/lines as quotation
-  const tableTop = custTop - custHeight - 14;
-  const tableHeight = 214;
-  const tableBottom = tableTop - tableHeight;
-  page.drawRectangle({ x: left, y: tableBottom, width: right - left, height: tableHeight, borderColor: boxBorder, borderWidth: 1 });
-
-  const colItem = left + 314;
-  const colRate = left + 398;
-  const colQty = left + 435;
-  const headerH = 26;
-  page.drawLine({ start: { x: left, y: tableTop - headerH }, end: { x: right, y: tableTop - headerH }, thickness: 1, color: boxBorder });
-  page.drawLine({ start: { x: colItem, y: tableTop }, end: { x: colItem, y: tableBottom }, thickness: 1, color: boxBorder });
-  page.drawLine({ start: { x: colRate, y: tableTop }, end: { x: colRate, y: tableBottom }, thickness: 1, color: boxBorder });
-  page.drawLine({ start: { x: colQty, y: tableTop }, end: { x: colQty, y: tableBottom }, thickness: 1, color: boxBorder });
-
-  page.drawText('Item Description', { x: left + 110, y: tableTop - 18, size: 11, font: fontBold, color: textDark });
-  page.drawText('Unit Price', { x: colItem + 16, y: tableTop - 18, size: 11, font: fontBold, color: textDark });
-  page.drawText('Qty', { x: colRate + 8, y: tableTop - 18, size: 11, font: fontBold, color: textDark });
-  page.drawText('Total', { x: colQty + 24, y: tableTop - 18, size: 11, font: fontBold, color: textDark });
-
-  const bodyTop = tableTop - headerH;
-  const rateRight = colRate - 6;
-  const totalRight = right - 6;
-  const fixedRowH = 26;
-  const realItems = items.filter((it) => it && (asciiOnly(it.description || '').replace(/-/g, '').trim() || Number(it.amount)));
-  realItems.forEach((it, i) => {
-    page.drawLine({ start: { x: left, y: bodyTop - (i + 1) * fixedRowH }, end: { x: right, y: bodyTop - (i + 1) * fixedRowH }, thickness: 1, color: boxBorder });
-    const yRow = bodyTop - i * fixedRowH - 16;
-    const qty = Number(it.quantity || 1);
-    const rateVal = Number(it.rate || (qty ? Number(it.amount || 0) / qty : it.amount || 0));
-    const amt = Number(it.amount || 0);
-    const desc = asciiOnly(it.description || '').substring(0, 55);
-    page.drawText(desc, { x: left + 6, y: yRow, size: 9.5, font, color: textDark });
-    drawRight(pdfAmount(rateVal), rateRight, yRow, 9.5, font);
-    page.drawText(String(qty), { x: colRate + 14, y: yRow, size: 9.5, font, color: textDark });
-    drawRight(pdfAmount(amt), totalRight, yRow, 9.5, font);
-  });
-
-  // Terms + summary – same layout as quotation
-  const termsTop = tableBottom - 16;
-  const summaryW = 176;
-  const summaryX = right - summaryW;
-
-  page.drawText('Terms and Conditions:', { x: left + 2, y: termsTop, size: 11, font: fontBold, color: textDark });
-  const manualTerms = String(invoice.terms_text || '')
-    .split(/\r?\n/)
-    .map((s) => asciiOnly(s).trim())
-    .filter(Boolean);
-  const termsArr = manualTerms.length ? manualTerms : (Array.isArray(TERMS_PDF) ? TERMS_PDF : [TERMS_PDF]);
-
-  // Word-wrap each term line to fit within the left column (left of the summary box).
-  const termsMaxW = (summaryX - left - 14);
-  const termFontSize = 9;
-  const termLineH = 13;
-  const wrapTermLine = (text) => {
-    const words = text.split(' ');
+  const wrapItemDesc = (text, size = 9) => {
+    const words = asciiOnly(text || '').split(/\s+/).filter(Boolean);
     const lines = [];
     let cur = '';
     for (const w of words) {
       const test = cur ? `${cur} ${w}` : w;
-      if (font.widthOfTextAtSize(test, termFontSize) <= termsMaxW) {
-        cur = test;
-      } else {
+      if (font.widthOfTextAtSize(test, size) <= itemColW) cur = test;
+      else {
         if (cur) lines.push(cur);
         cur = w;
       }
     }
     if (cur) lines.push(cur);
-    return lines;
+    return lines.length ? lines : ['-'];
   };
 
-  let ty = termsTop - 16;
-  termsArr.slice(0, 8).forEach((line, idx) => {
-    const prefix = `${idx + 1}. `;
-    const prefixW = font.widthOfTextAtSize(prefix, termFontSize);
-    const wrapped = wrapTermLine(asciiOnly(line));
-    wrapped.forEach((wl, wi) => {
-      if (ty < 80) return;
-      const drawX = wi === 0 ? left + 2 : left + 2 + prefixW;
-      const drawTxt = wi === 0 ? prefix + wl : wl;
-      page.drawText(drawTxt, { x: drawX, y: ty, size: termFontSize, font, color: textDark });
-      ty -= termLineH;
+  const drawRightOn = (pg, t, x, yPos, s = 10, f = font) => {
+    const safe = asciiOnly(t);
+    const w = f.widthOfTextAtSize(safe, s);
+    pg.drawText(safe, { x: x - w, y: yPos, size: s, font: f, color: textDark });
+  };
+
+  const drawTableHeader = (pg, yTop) => {
+    const h = 22;
+    pg.drawRectangle({ x: left, y: yTop - h, width: right - left, height: h, borderColor: boxBorder, borderWidth: 1 });
+    pg.drawLine({ start: { x: colItemL - 20, y: yTop }, end: { x: colItemL - 20, y: yTop - h }, thickness: 1, color: boxBorder });
+    pg.drawLine({ start: { x: colQty - 6, y: yTop }, end: { x: colQty - 6, y: yTop - h }, thickness: 1, color: boxBorder });
+    pg.drawLine({ start: { x: colRateR + 8, y: yTop }, end: { x: colRateR + 8, y: yTop - h }, thickness: 1, color: boxBorder });
+    pg.drawLine({ start: { x: colTaxR + 8, y: yTop }, end: { x: colTaxR + 8, y: yTop - h }, thickness: 1, color: boxBorder });
+    pg.drawText('#', { x: colNum, y: yTop - 15, size: 9, font: fontBold, color: textDark });
+    pg.drawText('Item', { x: colItemL, y: yTop - 15, size: 9, font: fontBold, color: textDark });
+    pg.drawText('Qty', { x: colQty, y: yTop - 15, size: 9, font: fontBold, color: textDark });
+    drawRightOn(pg, 'Rate', colRateR, yTop - 15, 9, fontBold);
+    drawRightOn(pg, 'Tax', colTaxR, yTop - 15, 9, fontBold);
+    drawRightOn(pg, 'Amount', colAmtR, yTop - 15, 9, fontBold);
+    return yTop - h;
+  };
+
+  const totalsBlockH = 88;
+  let page = doc.addPage([pageWidth, pageHeight]);
+  let y = pageHeight - 56;
+
+  page.drawText('INVOICE', { x: left, y, size: 26, font: fontBold, color: textDark });
+  y -= 28;
+  page.drawText('# ' + invNo, { x: left, y, size: 11, font: fontBold, color: textDark });
+  y -= 16;
+  page.drawText(statusLine, { x: left, y, size: 10, font: fontBold, color: textDark });
+  y -= 20;
+
+  page.drawText(asciiOnly(COMPANY_PDF.name || 'Company'), { x: left, y, size: 10, font: fontBold, color: textDark });
+  y -= 14;
+  const addrParts = asciiOnly(COMPANY_PDF.address || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((p) => !['city', 'state', 'zip', 'zipcode', 'zip code', 'pin', 'pincode', 'pin code'].includes(String(p).toLowerCase()));
+  const addrLine = addrParts.length ? addrParts.join(', ') : '-';
+  const addrFontSize = 9;
+  const addrMaxW = right - left;
+  const addrWords = asciiOnly(addrLine).split(/\s+/).filter(Boolean);
+  const addrLines = [];
+  let cur = '';
+  for (const w of addrWords) {
+    const test = cur ? `${cur} ${w}` : w;
+    if (font.widthOfTextAtSize(test, addrFontSize) <= addrMaxW) cur = test;
+    else {
+      if (cur) addrLines.push(cur);
+      cur = w;
+      if (addrLines.length >= 2) break;
+    }
+  }
+  if (cur && addrLines.length < 2) addrLines.push(cur);
+  const addrToDraw = addrLines.length ? addrLines.slice(0, 2) : ['-'];
+  addrToDraw.forEach((ln) => {
+    page.drawText(ln, { x: left, y, size: addrFontSize, font, color: textDark });
+    y -= 12;
+  });
+  page.drawText(asciiOnly(COMPANY_PDF.phone || '-'), { x: left, y, size: 9, font, color: textDark });
+  y -= 12;
+  if (COMPANY_PDF.email) {
+    page.drawText(asciiOnly(COMPANY_PDF.email), { x: left, y, size: 9, font, color: textDark });
+    y -= 12;
+  }
+  if (COMPANY_PDF.gst) {
+    page.drawText('GST No.: ' + asciiOnly(COMPANY_PDF.gst), { x: left, y, size: 9, font, color: textDark });
+    y -= 12;
+  }
+  y -= 22;
+
+  const mid = left + (right - left) * 0.48;
+  page.drawText('Bill To:', { x: left, y, size: 9, font: fontBold, color: textDark });
+  page.drawText(billName, { x: left, y: y - 14, size: 10, font: fontBold, color: textDark });
+  page.drawText('Invoice Date: ' + invDateStr, { x: mid, y, size: 9, font, color: textDark });
+  page.drawText('Due Date: ' + dueDateStr, { x: mid, y: y - 14, size: 9, font, color: textDark });
+  page.drawText('Sale Agent: ' + agentStrPdf, { x: mid, y: y - 28, size: 9, font, color: textDark });
+  y -= 48;
+
+  y -= 8;
+  y = drawTableHeader(page, y);
+  const lineGap = 11;
+  const padRow = 6;
+
+  const drawRowLine = (pg, yLine) => {
+    pg.drawLine({ start: { x: left, y: yLine }, end: { x: right, y: yLine }, thickness: 1, color: boxBorder });
+  };
+
+  for (let i = 0; i < realItems.length; i++) {
+    const it = realItems[i];
+    const qty = Number(it.quantity || 1);
+    const rateVal = Number(it.rate || (qty ? Number(it.amount || 0) / qty : it.amount || 0));
+    const amt = Number(it.amount || 0);
+    const descLines = wrapItemDesc(it.description || '');
+    const rowH = Math.max(22, descLines.length * lineGap + padRow * 2);
+
+    if (y - rowH < minY + totalsBlockH) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      y = pageHeight - 56;
+      y = drawTableHeader(page, y);
+    }
+
+    const yRowTop = y;
+    y -= padRow;
+    page.drawText(String(i + 1), { x: colNum, y: y - lineGap + 4, size: 9, font, color: textDark });
+    descLines.forEach((ln, li) => {
+      page.drawText(ln.substring(0, 120), { x: colItemL, y: y - li * lineGap, size: 9, font, color: textDark });
     });
-    ty -= 2;
-  });
-
-  const subtotal = Number(invoice.subtotal) || 0;
-  const discountVal = Number(invoice.discount || 0);
-  const discountPct = subtotal > 0 ? Math.round((discountVal / subtotal) * 100) : 0;
-  const taxPct = Number(invoice.tax_percent || 0);
-  const total = Number(invoice.total || 0);
-  const taxAmt = Math.max(0, total - (subtotal - discountVal));
-  const paid = Array.isArray(payments)
-    ? payments.reduce((s, p) => s + Number(p.amount || 0), 0)
-    : 0;
-  const due = Math.max(0, total - paid);
-
-  const summaryRows = [
-    ['Subtotal:', pdfAmount(subtotal)],
-    ['Discount (' + discountPct + '%):', pdfAmount(discountVal)],
-    ['Tax (' + taxPct + '%):', pdfAmount(taxAmt)],
-    ['Total Paid:', pdfAmount(paid)],
-    ['Due Amount:', pdfAmount(due)],
-  ];
-
-  const sumTop = termsTop + 4;
-  const rowH2 = 22;
-  const sumH = rowH2 * summaryRows.length;
-  page.drawRectangle({ x: summaryX, y: sumTop - sumH, width: summaryW, height: sumH, borderColor: boxBorder, borderWidth: 1 });
-  for (let i = 1; i < summaryRows.length; i++) {
-    const yy = sumTop - i * rowH2;
-    page.drawLine({ start: { x: summaryX, y: yy }, end: { x: right, y: yy }, thickness: 1, color: boxBorder });
-  }
-  for (let i = 0; i < summaryRows.length; i++) {
-    const yy = sumTop - i * rowH2 - 16;
-    const [label, val] = summaryRows[i];
-    page.drawText(label, { x: summaryX + 10, y: yy, size: 10, font: fontBold, color: textDark });
-    drawRight(val, right - 8, yy, 10, fontBold);
+    page.drawText(String(qty), { x: colQty, y: y - lineGap + 4, size: 9, font, color: textDark });
+    drawRightOn(page, pdfAmount(rateVal), colRateR, y - lineGap + 4, 9, font);
+    drawRightOn(page, `${taxPct}%`, colTaxR, y - lineGap + 4, 9, font);
+    drawRightOn(page, pdfAmount(amt), colAmtR, y - lineGap + 4, 9, font);
+    y = yRowTop - rowH;
+    drawRowLine(page, y);
   }
 
-  // Combined Bank + UPI box (one clean section, no overflow)
-  const payTop = sumTop - sumH - 18;
-  const payH = 130;
-  const payBottom = payTop - payH;
-  page.drawRectangle({
-    x: left,
-    y: payBottom,
-    width: right - left,
-    height: payH,
-    borderColor: boxBorder,
-    borderWidth: 1,
-  });
-  // Header line
-  page.drawLine({
-    start: { x: left, y: payTop - 20 },
-    end: { x: right, y: payTop - 20 },
-    thickness: 1,
-    color: boxBorder,
-  });
-  page.drawText('Bank & UPI Details', {
-    x: left + 10,
-    y: payTop - 13,
-    size: 11,
-    font: fontBold,
-    color: textDark,
-  });
-
-  // Vertical split: left for text, right for QR
-  const midX = left + (right - left) * 0.55;
-  page.drawLine({
-    start: { x: midX, y: payTop },
-    end: { x: midX, y: payBottom },
-    thickness: 1,
-    color: boxBorder,
-  });
-
-  // Left side: bank + upi text
-  const textYStart = payTop - 32;
-  let ty2 = textYStart;
-  const bankLines = [
-    'Bank: ' + asciiOnly(BANK_PDF.bankName || ''),
-    'Account No.: ' + asciiOnly(BANK_PDF.accountNumber || ''),
-    'IFSC: ' + asciiOnly(BANK_PDF.ifsc || ''),
-    'UPI: ' + asciiOnly(BANK_PDF.upi || ''),
-  ];
-  bankLines.forEach((line) => {
-    if (!line.trim().endsWith(':')) {
-      page.drawText(line, {
-        x: left + 10,
-        y: ty2,
-        size: 10,
-        font,
-        color: textDark,
-      });
-      ty2 -= 14;
-    }
-  });
-
-  // Right side: UPI name / id / QR
-  const upiQrImage = await loadUpiQrImage(doc, COMPANY_PDF.upiQrPath);
-  if (COMPANY_PDF.upi || COMPANY_PDF.upiName || upiQrImage) {
-    const qrSize = 50;
-    const qrX = midX + ((right - midX) - qrSize) / 2;
-    // Add small top margin so QR sits a bit lower from the header
-    const qrY = payTop - 55 - qrSize;
-    if (upiQrImage) {
-      const scale = Math.min(qrSize / upiQrImage.width, qrSize / upiQrImage.height);
-      page.drawImage(upiQrImage, {
-        x: qrX,
-        y: qrY,
-        width: upiQrImage.width * scale,
-        height: upiQrImage.height * scale,
-      });
-    }
-    const upiName = asciiOnly(COMPANY_PDF.upiName || COMPANY_PDF.name || '');
-    const upiId = asciiOnly(COMPANY_PDF.upi || '');
-    let uy = payTop - 30;
-    if (upiName) {
-      page.drawText(upiName, {
-        x: midX + 10,
-        y: uy,
-        size: 9.5,
-        font: fontBold,
-        color: textDark,
-      });
-      uy -= 14;
-    }
-    if (upiId) {
-      page.drawText('UPI ID: ' + upiId, {
-        x: midX + 10,
-        y: uy,
-        size: 9,
-        font,
-        color: textDark,
-      });
-    }
+  if (y < minY + totalsBlockH + 20) {
+    page = doc.addPage([pageWidth, pageHeight]);
+    y = pageHeight - 100;
   }
+
+  y -= 12;
+  drawRightOn(page, 'Sub Total ' + pdfAmount(subtotal), colAmtR, y, 10, fontBold);
+  y -= 16;
+  drawRightOn(
+    page,
+    `Discount (${discountPctLabel}%) ` + pdfAmount(-Math.abs(discountVal)),
+    colAmtR,
+    y,
+    10,
+    fontBold
+  );
+  y -= 16;
+  drawRightOn(page, 'Adjustment ' + pdfAmount(adjustment), colAmtR, y, 10, fontBold);
+  y -= 18;
+  drawRightOn(page, 'Total ' + pdfAmount(total), colAmtR, y, 11, fontBold);
+
+  page = doc.addPage([pageWidth, pageHeight]);
+  y = pageHeight - 72;
+  drawRightOn(page, 'Total Paid ' + pdfAmount(-Math.abs(paid)), colAmtR, y, 11, fontBold);
+  y -= 20;
+  drawRightOn(page, 'Amount Due ' + pdfAmount(due), colAmtR, y, 11, fontBold);
+  y -= 28;
+  page.drawText('Transactions:', { x: left, y, size: 10, font: fontBold, color: textDark });
+  y -= 18;
+
+  const th = 20;
+  page.drawRectangle({ x: left, y: y - th, width: right - left, height: th, borderColor: boxBorder, borderWidth: 1 });
+  const c1 = left + 8;
+  const c2 = left + 88;
+  const c3 = left + 220;
+  const c4 = right - 8;
+  page.drawLine({ start: { x: c2 - 6, y }, end: { x: c2 - 6, y: y - th }, thickness: 1, color: boxBorder });
+  page.drawLine({ start: { x: c3 - 6, y }, end: { x: c3 - 6, y: y - th }, thickness: 1, color: boxBorder });
+  page.drawText('Payment #', { x: c1, y: y - 14, size: 9, font: fontBold, color: textDark });
+  page.drawText('Payment Mode', { x: c2, y: y - 14, size: 9, font: fontBold, color: textDark });
+  page.drawText('Date', { x: c3, y: y - 14, size: 9, font: fontBold, color: textDark });
+  drawRightOn(page, 'Amount', c4, y - 14, 9, fontBold);
+  y -= th;
+
+  payments.forEach((p, idx) => {
+    if (y < minY + 120) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      y = pageHeight - 72;
+    }
+    const rh = 18;
+    page.drawLine({ start: { x: left, y: y }, end: { x: right, y: y }, thickness: 1, color: boxBorder });
+    page.drawText(String(p.id || idx + 1), { x: c1, y: y - 13, size: 9, font, color: textDark });
+    page.drawText(invoicePaymentModeLabel(p.mode), { x: c2, y: y - 13, size: 9, font, color: textDark });
+    page.drawText(formatInvoicePdfDate(p.paid_at), { x: c3, y: y - 13, size: 9, font, color: textDark });
+    drawRightOn(page, pdfAmount(p.amount), c4, y - 13, 9, font);
+    y -= rh;
+  });
+  page.drawLine({ start: { x: left, y: y }, end: { x: right, y: y }, thickness: 1, color: boxBorder });
+
+  y -= 24;
+  page.drawText('Offline Payment:', { x: left, y, size: 10, font: fontBold, color: textDark });
+  y -= 16;
+  page.drawText(asciiOnly(BANK_PDF.bankName || 'Bank Transfer'), { x: left, y, size: 9, font, color: textDark });
+  y -= 14;
+  page.drawText('Account Type: Current', { x: left, y, size: 9, font, color: textDark });
+  y -= 14;
+  page.drawText('Account Number: ' + asciiOnly(BANK_PDF.accountNumber || '-'), { x: left, y, size: 9, font, color: textDark });
+  y -= 14;
+  page.drawText('Account Holder Name: ' + asciiOnly(COMPANY_PDF.name || '-'), { x: left, y, size: 9, font, color: textDark });
+  y -= 14;
+  page.drawText('IFSC Code: ' + asciiOnly(BANK_PDF.ifsc || '-'), { x: left, y, size: 9, font, color: textDark });
+  y -= 14;
+  if (BANK_PDF.bankBranch) {
+    page.drawText('Branch: ' + asciiOnly(BANK_PDF.bankBranch), { x: left, y, size: 9, font, color: textDark });
+    y -= 14;
+  }
+  if (BANK_PDF.upiName) {
+    page.drawText('UPI Name: ' + asciiOnly(BANK_PDF.upiName), { x: left, y, size: 9, font, color: textDark });
+    y -= 14;
+  }
+  if (BANK_PDF.upi) {
+    page.drawText('UPI ID: ' + asciiOnly(BANK_PDF.upi), { x: left, y, size: 9, font, color: textDark });
+    y -= 14;
+  }
+
+  y -= 10;
+  page.drawText('Terms & Conditions:', { x: left, y, size: 10, font: fontBold, color: textDark });
+  y -= 14;
+
+  const termsFontSize = 8.8;
+  const termsLineH = 12;
+  const termsMaxW = right - left - 10;
+  const wrapTerms = (text) => {
+    const words = asciiOnly(text || '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+      const test = cur ? `${cur} ${w}` : w;
+      if (font.widthOfTextAtSize(test, termsFontSize) <= termsMaxW) cur = test;
+      else {
+        if (cur) lines.push(cur);
+        cur = w;
+      }
+    }
+    if (cur) lines.push(cur);
+    return lines.length ? lines : ['-'];
+  };
+
+  for (let i = 0; i < (termsArrPdf || []).length; i++) {
+    if (y < minY + 40) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      y = pageHeight - 72;
+    }
+    const prefix = `${i + 1}. `;
+    const wrapped = wrapTerms(termsArrPdf[i]);
+    for (let wi = 0; wi < wrapped.length; wi++) {
+      if (y < minY + 40) break;
+      const line = (wi === 0 ? prefix : '   ') + wrapped[wi];
+      page.drawText(line, { x: left + 4, y, size: termsFontSize, font, color: textDark });
+      y -= termsLineH;
+    }
+    y -= 2;
+  }
+
+  y -= 18;
+  page.drawText('Authorized Signature', { x: left, y, size: 10, font: fontBold, color: textDark });
+  page.drawLine({ start: { x: left, y: y - 4 }, end: { x: left + 160, y: y - 4 }, thickness: 0.5, color: textDark });
+
+  const allPages = doc.getPages();
+  const totalP = allPages.length;
+  allPages.forEach((pg, idx) => {
+    const foot = `-- ${idx + 1} of ${totalP} --`;
+    const fw = font.widthOfTextAtSize(foot, 9);
+    pg.drawText(foot, { x: (pageWidth - fw) / 2, y: footerY, size: 9, font, color: rgb(0.45, 0.45, 0.45) });
+  });
 
   const pdfBytes = await doc.save();
   return Buffer.from(pdfBytes);

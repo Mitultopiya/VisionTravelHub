@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Invoice {{INV_REF}}</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #1a1a1a;
+    font-size: 12px;
+    line-height: 1.35;
+    background: #fff;
+  }
+  .wrap {
+    max-width: 750px;
+    margin: 0 auto;
+    padding: 6px 18px 18px;
+  }
+  .brand-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:14px;
+    margin-bottom:6px;
+  }
+  .brand-left{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    min-width:0;
+  }
+  .logo{
+    width:72px;
+    height:auto;
+    max-height:72px;
+    object-fit:contain;
+    display:block;
+  }
+  .logo.is-hidden{ display:none; }
+  .ref-code {
+    font-size: 12px;
+    color: #333;
+    margin-top: 2px;
+    white-space: nowrap;
+  }
+  .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+  }
+  .invoice-title-block {
+    text-align: right;
+  }
+  .invoice-title-block h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: bold;
+    letter-spacing: 0.02em;
+  }
+  .invoice-title-block .inv-hash {
+    margin-top: 6px;
+    font-size: 12px;
+  }
+  .invoice-title-block .status {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: bold;
+  }
+  .company-block {
+    margin-top: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .company-block .name { font-weight: bold; }
+  .company-block .muted { color: #444; }
+  .bill-meta {
+    width: 100%;
+    margin-top: 12px;
+    border-collapse: collapse;
+  }
+  .bill-meta td {
+    vertical-align: top;
+    padding: 0;
+    font-size: 12px;
+  }
+  .bill-meta .left-meta{
+    text-align:left;
+  }
+  .bill-meta .right-meta {
+    text-align: right;
+  }
+  .bill-meta .right-meta .line { margin-bottom: 4px; }
+  .bill-to{
+    display:inline-block;
+    text-align:right;
+    max-width: 320px;
+  }
+  .items-table {
+    width: 100%;
+    margin-top: 12px;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .items-table thead tr {
+    background: #2E5BFF;
+    color: #fff;
+  }
+  .items-table th {
+    padding: 8px 8px;
+    font-weight: bold;
+    text-align: left;
+  }
+  .items-table th.num { width: 36px; }
+  .items-table th.qty,
+  .items-table th.rate,
+  .items-table th.tax,
+  .items-table th.amt {
+    text-align: right;
+    width: 1%;
+    white-space: nowrap;
+  }
+  .items-table td {
+    padding: 8px 8px 7px;
+    vertical-align: top;
+    border-bottom: 1px solid #eee;
+  }
+  .items-table td.idx { color: #333; }
+  .items-table td.qty,
+  .items-table td.rate,
+  .items-table td.tax,
+  .items-table td.amt {
+    text-align: right;
+  }
+  .item-title { font-weight: bold; display: block; margin-bottom: 4px; }
+  .item-desc {
+    font-size: 11px;
+    font-weight: normal;
+    color: #333;
+    line-height: 1.4;
+  }
+  .totals-wrap {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .totals-inner {
+    width: 100%;
+    max-width: 320px;
+    text-align: right;
+    font-size: 12px;
+  }
+  .totals-inner .line { margin-bottom: 6px; }
+  .bar-total, .bar-due {
+    background: #d9d9d9;
+    padding: 8px 10px;
+    margin-top: 6px;
+    font-weight: bold;
+    font-size: 13px;
+    text-align: right;
+  }
+  .section-title {
+    font-weight: bold;
+    margin-top: 14px;
+    margin-bottom: 6px;
+  }
+  .tx-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .tx-table thead tr {
+    border-bottom: 2px solid #1a1a1a;
+  }
+  .tx-table th {
+    text-align: left;
+    padding: 6px 6px 8px 0;
+    font-weight: bold;
+  }
+  .tx-table th.amt { text-align: right; }
+  .tx-table td {
+    padding: 8px 6px 8px 0;
+    border-bottom: 1px solid #eee;
+  }
+  .tx-table td.amt { text-align: right; }
+  .offline {
+    margin-top: 14px;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .offline .title { font-weight: bold; margin-bottom: 6px; }
+  .bottom-row{
+    margin-top: 14px;
+    display:flex;
+    gap: 14px;
+    align-items:flex-start;
+  }
+  .panel{
+    border: 1px solid #e5e5e5;
+    padding: 10px 10px 8px;
+    border-radius: 6px;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .panel .title{
+    font-weight:bold;
+    margin-bottom: 8px;
+  }
+  .terms-list{
+    margin: 0;
+    padding-left: 18px;
+  }
+  .terms-list li{
+    margin: 0 0 6px 0;
+  }
+  .bank-table{
+    width:100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .bank-table td{
+    padding: 2px 0;
+    vertical-align: top;
+  }
+  .bank-table td.lbl{
+    width: 44%;
+    color:#333;
+    font-weight: bold;
+    padding-right: 8px;
+    white-space: nowrap;
+  }
+  .sig {
+    margin-top: 22px;
+    text-align: right;
+    font-size: 12px;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand-row">
+    <div class="brand-left">
+      {{LOGO_IMG_HTML}}
+      <div class="ref-code">{{INV_REF}}</div>
+    </div>
+    <div class="invoice-title-block">
+      <h1>INVOICE</h1>
+      <div class="inv-hash"># {{INV_REF}}</div>
+      <div class="status">{{STATUS}}</div>
+    </div>
+  </div>
+
+  <div class="company-block">
+    <div class="name">{{COMPANY_NAME}}</div>
+    <div>{{COMPANY_ADDRESS_HTML}}</div>
+    <div class="muted">{{COMPANY_PHONE}}{{COMPANY_EMAIL_LINE}}</div>
+    {{COMPANY_GST_LINE}}
+  </div>
+
+  <table class="bill-meta">
+    <tr>
+      <td class="left-meta">
+        <strong>Bill To:</strong><br>
+        {{BILL_TO}}
+      </td>
+      <td class="right-meta">
+        <div class="line"><strong>Invoice Date</strong> {{INVOICE_DATE}}</div>
+        <div class="line"><strong>Due Date</strong> {{DUE_DATE}}</div>
+        <div class="line"><strong>Sale Agent</strong> {{SALE_AGENT}}</div>
+      </td>
+    </tr>
+  </table>
+
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th class="num">#</th>
+        <th>Item</th>
+        <th class="qty">Qty</th>
+        <th class="rate">Rate</th>
+        <th class="tax">Tax</th>
+        <th class="amt">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ITEM_ROWS}}
+    </tbody>
+  </table>
+
+  <div class="totals-wrap">
+    <div class="totals-inner">
+      <div class="line">Sub Total {{SUB_TOTAL}}</div>
+      <div class="line">{{DISCOUNT_LINE}}</div>
+      <div class="line">Adjustment {{ADJUSTMENT}}</div>
+      <div class="bar-total">Total {{TOTAL}}</div>
+      <div style="height:10px"></div>
+      <div class="line">Total Paid {{TOTAL_PAID}}</div>
+      <div class="bar-due">Amount Due {{AMOUNT_DUE}}</div>
+    </div>
+  </div>
+
+  <div class="section-title">Transactions:</div>
+  <table class="tx-table">
+    <thead>
+      <tr>
+        <th>Payment #</th>
+        <th>Payment Mode</th>
+        <th>Date</th>
+        <th class="amt">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{TRANSACTION_ROWS}}
+    </tbody>
+  </table>
+
+  <div class="bottom-row">
+    <div class="panel">
+      <div class="title">Terms &amp; Conditions</div>
+      {{TERMS_HTML}}
+    </div>
+    <div class="panel">
+      <div class="title">Bank Details</div>
+      {{BANK_DETAILS_HTML}}
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

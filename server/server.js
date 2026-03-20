@@ -23,6 +23,7 @@ import reportsRoutes from './routes/reportsRoutes.js';
 import pdfRoutes from './routes/pdfRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import branchesRoutes from './routes/branchesRoutes.js';
+import itineraryTemplateRoutes from './routes/itineraryTemplateRoutes.js';
 import { verifyToken, adminOrManager } from './middleware/auth.js';
 import { uploadImages } from './middleware/upload.js';
 import * as packagesController from './controllers/packagesController.js';
@@ -89,6 +90,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/pdf', pdfRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/branches', branchesRoutes);
+app.use('/api/admin/itinerary-template', itineraryTemplateRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -2,7 +2,7 @@ import pool from '../config/db.js';
 
 const tableColumns = {
   cities: ['name', 'country'],
-  hotels: ['name', 'city_id', 'address', 'contact', 'room_type', 'price', 'base_price', 'markup_price', 'month_prices'],
+  hotels: ['name', 'city_id', 'address', 'contact', 'room_type', 'extra_adult_price', 'price', 'base_price', 'markup_price', 'month_prices'],
   vehicles: ['name', 'type', 'capacity', 'price', 'base_price', 'markup_price', 'month_prices', 'contact', 'city_id'],
   activities: ['name', 'description', 'base_price', 'markup_price', 'price', 'month_prices', 'contact', 'city_id', 'image_url'],
 };
@@ -13,20 +13,37 @@ async function list(req, res, table) {
       req.query.branch_id && String(req.query.branch_id) !== 'all'
         ? parseInt(req.query.branch_id, 10)
         : (req.branchId ?? null);
-    let where = '';
-    const params = [];
-    if (branchId && Number.isFinite(branchId)) {
-      where = 'WHERE t.branch_id = $1';
-      params.push(branchId);
+    const stateFilter = table === 'cities' && req.query.state
+      ? String(req.query.state).trim()
+      : '';
+    const orderBy = table === 'cities' ? 'ORDER BY COALESCE(t.country, \'\'), t.name, t.id' : 'ORDER BY t.id';
+    const runQuery = async (useBranchScope) => {
+      const filters = [];
+      const params = [];
+      if (useBranchScope && branchId && Number.isFinite(branchId)) {
+        filters.push(`(t.branch_id = $${params.length + 1} OR t.branch_id IS NULL)`);
+        params.push(branchId);
+      }
+      if (stateFilter) {
+        filters.push(`LOWER(COALESCE(t.country, '')) = LOWER($${params.length + 1})`);
+        params.push(stateFilter);
+      }
+      const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+      return pool.query(
+        `SELECT t.*, b.name as branch_name
+         FROM ${table} t
+         LEFT JOIN branches b ON t.branch_id = b.id
+         ${where}
+         ${orderBy}`,
+        params
+      );
+    };
+
+    let result = await runQuery(true);
+    // Fallback: if scoped list is empty, return global/all read list.
+    if (branchId && Number.isFinite(branchId) && result.rows.length === 0) {
+      result = await runQuery(false);
     }
-    const result = await pool.query(
-      `SELECT t.*, b.name as branch_name
-       FROM ${table} t
-       LEFT JOIN branches b ON t.branch_id = b.id
-       ${where}
-       ORDER BY t.id`,
-      params
-    );
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -74,15 +91,67 @@ async function update(req, res, table) {
   }
 }
 
+async function optionalTxQuery(client, sql, params = []) {
+  const sp = `sp_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  await client.query(`SAVEPOINT ${sp}`);
+  try {
+    await client.query(sql, params);
+    await client.query(`RELEASE SAVEPOINT ${sp}`);
+  } catch {
+    await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
+    await client.query(`RELEASE SAVEPOINT ${sp}`);
+  }
+}
+
 async function remove(req, res, table) {
+  let client;
   try {
     const { id } = req.params;
-    const result = await pool.query(`DELETE FROM ${table} WHERE id = $1 RETURNING id`, [id]);
+    const itemId = Number(id);
+    if (!Number.isFinite(itemId)) return res.status(400).json({ message: 'Invalid id.' });
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // For older databases where some FK constraints are still RESTRICT/NO ACTION,
+    // detach dependent records manually before deleting.
+    if (table === 'cities') {
+      await client.query('UPDATE hotels SET city_id = NULL WHERE city_id = $1', [itemId]);
+      await client.query('UPDATE vehicles SET city_id = NULL WHERE city_id = $1', [itemId]);
+      await client.query('UPDATE activities SET city_id = NULL WHERE city_id = $1', [itemId]);
+      await optionalTxQuery(client, 'UPDATE itinerary_template_days SET city_id = NULL WHERE city_id = $1', [itemId]);
+      await optionalTxQuery(client, 'UPDATE itinerary_templates SET state_id = NULL WHERE state_id = $1', [itemId]);
+      await optionalTxQuery(client, 'UPDATE packages SET city_ids = array_remove(city_ids, $1) WHERE city_ids @> ARRAY[$1]::INTEGER[]', [itemId]);
+    }
+
+    if (table === 'hotels') {
+      await optionalTxQuery(client, 'UPDATE packages SET default_hotel_id = NULL WHERE default_hotel_id = $1', [itemId]);
+      await optionalTxQuery(client, 'UPDATE bookings SET assigned_hotel_id = NULL WHERE assigned_hotel_id = $1', [itemId]);
+      await optionalTxQuery(client, 'UPDATE bookings_days SET hotel_id = NULL WHERE hotel_id = $1', [itemId]);
+    }
+
+    if (table === 'vehicles') {
+      await optionalTxQuery(client, 'UPDATE packages SET default_vehicle_id = NULL WHERE default_vehicle_id = $1', [itemId]);
+      await optionalTxQuery(client, 'UPDATE bookings SET assigned_vehicle_id = NULL WHERE assigned_vehicle_id = $1', [itemId]);
+    }
+
+    const result = await client.query(`DELETE FROM ${table} WHERE id = $1 RETURNING id`, [itemId]);
     if (result.rowCount === 0) return res.status(404).json({ message: 'Not found.' });
+
+    await client.query('COMMIT');
     res.json({ message: 'Deleted.' });
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error(err);
+    if (err?.code === '23503') {
+      return res.status(409).json({
+        message: `Cannot delete this ${table.slice(0, -1)} because it is used in other records.`,
+        detail: err.detail || null,
+      });
+    }
     res.status(500).json({ message: 'Server error.' });
+  } finally {
+    if (client) client.release();
   }
 }
 

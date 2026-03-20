@@ -40,10 +40,18 @@ export const invoiceDocPdf = async (req, res) => {
     const { id } = req.params;
     const inv = await pool.query('SELECT * FROM invoices WHERE id = $1', [id]);
     if (inv.rows.length === 0) return res.status(404).json({ message: 'Invoice not found.' });
+    if (req.branchId && inv.rows[0].branch_id && Number(inv.rows[0].branch_id) !== Number(req.branchId)) {
+      return res.status(403).json({ message: 'Access denied for this invoice.' });
+    }
     const customer = await pool.query('SELECT * FROM customers WHERE id = $1', [inv.rows[0].customer_id]);
     const items = await pool.query('SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY id', [id]);
     const payments = await pool.query('SELECT * FROM invoice_payments WHERE invoice_id = $1 ORDER BY paid_at', [id]);
-    const buf = await generateInvoiceDocPDF(inv.rows[0], customer.rows[0] || {}, items.rows, payments.rows);
+    let saleAgent = '';
+    if (inv.rows[0].created_by) {
+      const ur = await pool.query('SELECT name FROM users WHERE id = $1', [inv.rows[0].created_by]);
+      saleAgent = ur.rows[0]?.name || '';
+    }
+    const buf = await generateInvoiceDocPDF(inv.rows[0], customer.rows[0] || {}, items.rows, payments.rows, saleAgent);
     res.setHeader('Content-Type', 'application/pdf');
     const fileName = (inv.rows[0].invoice_number || `INV-${id}`).replace(/[^\w.-]/g, '_');
     res.setHeader('Content-Disposition', `attachment; filename=${fileName}.pdf`);
@@ -59,7 +67,7 @@ export const paymentSlipPdf = async (req, res) => {
   try {
     const { id } = req.params; // invoice_payment id
     const result = await pool.query(
-      `SELECT ip.*, i.invoice_number, i.total as invoice_total, i.company_gst,
+      `SELECT ip.*, i.invoice_number, i.total as invoice_total, i.company_gst, i.branch_id,
               i.customer_gst, i.place_of_supply,
               c.name as customer_name, c.mobile as customer_mobile, c.email as customer_email
        FROM invoice_payments ip
@@ -69,6 +77,9 @@ export const paymentSlipPdf = async (req, res) => {
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'Payment not found.' });
+    if (req.branchId && result.rows[0].branch_id && Number(result.rows[0].branch_id) !== Number(req.branchId)) {
+      return res.status(403).json({ message: 'Access denied for this payment slip.' });
+    }
     const buf = await generatePaymentSlipPDF(result.rows[0]);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=payment-receipt-${id}.pdf`);

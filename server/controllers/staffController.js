@@ -1,10 +1,19 @@
 import pool from '../config/db.js';
 import bcrypt from 'bcryptjs';
 
+function resolveBranchId(req) {
+  if (req.query.branch_id != null && String(req.query.branch_id) === 'all') return null;
+  if (req.query.branch_id != null && String(req.query.branch_id) !== '') {
+    const parsed = parseInt(req.query.branch_id, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return req.branchId ?? null;
+}
+
 /** List staff (manager + staff); admin can see all users via /users */
 export const list = async (req, res) => {
   try {
-    const branchId = req.query.branch_id ? parseInt(req.query.branch_id, 10) : (req.branchId ?? null);
+    const branchId = resolveBranchId(req);
     const where = branchId ? 'AND branch_id = $1' : '';
     const params = branchId ? [branchId] : [];
     const result = await pool.query(

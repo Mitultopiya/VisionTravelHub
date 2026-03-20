@@ -79,6 +79,7 @@ export async function initDb() {
         address TEXT,
         contact VARCHAR(100),
         room_type VARCHAR(100),
+        extra_adult_price DECIMAL(12,2),
         price DECIMAL(12,2),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )`,
@@ -141,6 +142,7 @@ export async function initDb() {
     await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;`).catch(() => {});
     await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS base_price DECIMAL(12,2);`).catch(() => {});
     await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS markup_price DECIMAL(12,2);`).catch(() => {});
+    await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS extra_adult_price DECIMAL(12,2);`).catch(() => {});
     await client.query(`ALTER TABLE hotels     ADD COLUMN IF NOT EXISTS month_prices JSONB;`).catch(() => {});
     await client.query(`ALTER TABLE vehicles   ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;`).catch(() => {});
     await client.query(`ALTER TABLE vehicles   ADD COLUMN IF NOT EXISTS base_price DECIMAL(12,2);`).catch(() => {});
@@ -150,6 +152,7 @@ export async function initDb() {
     await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL;`).catch(() => {});
     await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS base_price DECIMAL(12,2);`).catch(() => {});
     await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS markup_price DECIMAL(12,2);`).catch(() => {});
+    await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS price DECIMAL(12,2);`).catch(() => {});
     await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS month_prices JSONB;`).catch(() => {});
     await client.query(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS contact VARCHAR(100);`).catch(() => {});
 
@@ -192,6 +195,33 @@ export async function initDb() {
         meals TEXT,
         transport TEXT,
         notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Itinerary templates (admin-managed plans for staff dropdown usage)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS itinerary_templates (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        state_id INTEGER REFERENCES cities(id) ON DELETE SET NULL,
+        state_name VARCHAR(255),
+        branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+        total_nights INTEGER NOT NULL DEFAULT 0,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`ALTER TABLE itinerary_templates ADD COLUMN IF NOT EXISTS state_name VARCHAR(255);`).catch(() => {});
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS itinerary_template_days (
+        id SERIAL PRIMARY KEY,
+        itinerary_id INTEGER NOT NULL REFERENCES itinerary_templates(id) ON DELETE CASCADE,
+        day_number INTEGER NOT NULL,
+        city_id INTEGER REFERENCES cities(id) ON DELETE SET NULL,
+        city_name VARCHAR(255) NOT NULL,
+        night_count INTEGER NOT NULL DEFAULT 1,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -524,6 +554,9 @@ export async function initDb() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_payments_booking ON payments(booking_id);').catch(() => {});
     await client.query('CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id);').catch(() => {});
     await client.query('CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);').catch(() => {});
+    await client.query('CREATE INDEX IF NOT EXISTS idx_itinerary_templates_branch ON itinerary_templates(branch_id);').catch(() => {});
+    await client.query('CREATE INDEX IF NOT EXISTS idx_itinerary_templates_state ON itinerary_templates(state_id);').catch(() => {});
+    await client.query('CREATE INDEX IF NOT EXISTS idx_itinerary_template_days_itinerary ON itinerary_template_days(itinerary_id);').catch(() => {});
   } finally {
     client.release();
   }

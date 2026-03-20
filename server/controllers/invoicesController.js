@@ -1,5 +1,14 @@
 import pool from '../config/db.js';
 
+function resolveBranchId(req) {
+  if (req.query.branch_id != null && String(req.query.branch_id) === 'all') return null;
+  if (req.query.branch_id != null && String(req.query.branch_id) !== '') {
+    const parsed = parseInt(req.query.branch_id, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return req.branchId ?? null;
+}
+
 function getNextInvoiceNumber() {
   const year = new Date().getFullYear();
   const prefix = `INV-${year}-`;
@@ -17,10 +26,7 @@ function getNextInvoiceNumber() {
 
 export const list = async (req, res) => {
   try {
-    const branchId =
-      req.query.branch_id && String(req.query.branch_id) !== 'all'
-        ? parseInt(req.query.branch_id, 10)
-        : (req.branchId ?? null);
+    const branchId = resolveBranchId(req);
     const where = branchId && Number.isFinite(branchId) ? ' WHERE i.branch_id = $1' : '';
     const params = branchId ? [branchId] : [];
     const result = await pool.query(
