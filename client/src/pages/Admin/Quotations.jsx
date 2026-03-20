@@ -326,8 +326,11 @@ export default function Quotations() {
         const a = document.createElement('a');
         a.href = url;
         a.download = `quotation-${id}.pdf`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
         a.click();
-        window.URL.revokeObjectURL(url);
+        a.remove();
+        setTimeout(() => window.URL.revokeObjectURL(url), 1200);
         toast('PDF downloaded');
       })
       .catch(() => toast('Download failed', 'error'));

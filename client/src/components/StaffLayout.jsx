@@ -1,10 +1,22 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
-import { FaChartBar } from 'react-icons/fa';
+import { FaChartBar, FaUsers, FaCalculator, FaFileInvoice } from 'react-icons/fa';
 import Sidebar from './Sidebar';
 import Header from './Header';
 
-const staffNav = [{ to: '/staff', label: 'Dashboard', icon: FaChartBar }];
+const staffNav = [
+  { to: '/staff', label: 'Dashboard', icon: FaChartBar },
+  {
+    label: 'Customers',
+    icon: FaUsers,
+    children: [
+      { to: '/staff/customers', label: 'Customers', icon: FaUsers },
+      { to: '/staff/invoice', label: 'Invoice', icon: FaFileInvoice },
+      { to: '/staff/payment-slip', label: 'Payment Slip', icon: FaFileInvoice },
+    ],
+  },
+  { to: '/staff/rate-calculator', label: 'Rate Calculator', icon: FaCalculator },
+];
 
 export default function StaffLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);

@@ -656,7 +656,7 @@ export default function Reports() {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-5 py-4 text-sm text-slate-500">{s.branch || '-'}</td>
+                            <td className="px-5 py-4 text-sm text-slate-500">{s.branch_name || s.branch || '-'}</td>
                             <td className="px-5 py-4 text-center">
                               <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 text-sm font-bold">{s.completed_count || 0}</span>
                             </td>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   getPackage,
@@ -17,6 +17,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { useToast } from '../../context/ToastContext';
 import { getSelectedBranchId, branchParams } from '../../utils/branch';
+import { filterCitiesByState, getUniqueStates } from '../../utils/cities';
 import { FaPlus, FaTrash, FaImage } from 'react-icons/fa';
 
 const IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp';
@@ -47,6 +48,7 @@ export default function PackageBuilder() {
   const [hotels, setHotels] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [cityToAdd, setCityToAdd] = useState('');
+  const [stateToAdd, setStateToAdd] = useState('');
   const [branchId, setBranchId] = useState(() => getSelectedBranchId());
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -178,6 +180,8 @@ export default function PackageBuilder() {
   const selectedVehicle = vehicles.find((v) => String(v.id) === String(form.default_vehicle_id));
   const vehiclePrice = Number(selectedVehicle?.price || 0);
   const mergedTotal = basePrice + hotelPrice + vehiclePrice;
+  const stateOptions = useMemo(() => getUniqueStates(cities), [cities]);
+  const selectableCities = useMemo(() => filterCitiesByState(cities, stateToAdd), [cities, stateToAdd]);
 
   if (loading) return <Loading />;
 
@@ -227,14 +231,29 @@ export default function PackageBuilder() {
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">States</label>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
+                <select
+                  value={stateToAdd}
+                  onChange={(e) => {
+                    setStateToAdd(e.target.value);
+                    setCityToAdd('');
+                  }}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">— Select state —</option>
+                  {stateOptions.map((stateName) => (
+                    <option key={stateName} value={stateName}>
+                      {stateName}
+                    </option>
+                  ))}
+                </select>
                 <select
                   value={cityToAdd}
                   onChange={(e) => setCityToAdd(e.target.value)}
-                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 >
-                  <option value="">— Select state —</option>
-                  {cities.map((c) => (
+                  <option value="">— Select city —</option>
+                  {selectableCities.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -253,7 +272,7 @@ export default function PackageBuilder() {
                         key={cid}
                         className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700"
                       >
-                        {city?.name || `State #${cid}`}
+                        {city ? `${city.country} - ${city.name}` : `City #${cid}`}
                         <button type="button" onClick={() => removeCity(cid)} className="text-slate-500 hover:text-red-600">
                           ×
                         </button>

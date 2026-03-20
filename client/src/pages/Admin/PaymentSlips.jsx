@@ -286,8 +286,11 @@ function handleDownloadPdf(payment, toast) {
       const a = document.createElement('a');
       a.href = url;
       a.download = `payment-receipt-${payment.id}.pdf`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(url);
+      a.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1200);
     })
     .catch(() => toast('PDF download failed', 'error'));
 }
@@ -411,17 +414,10 @@ export default function PaymentSlips() {
   const [slipModal, setSlipModal] = useState(null);
   const [company, setCompany] = useState(DEFAULT_COMPANY);
 
-  const getSelectedBranchId = () => {
-    if (typeof window === 'undefined') return '';
-    return localStorage.getItem('vth_selected_branch_id') || '';
-  };
-
   const load = () => {
     setLoading(true);
-    const branchId = getSelectedBranchId();
-    const params = branchId ? { branch_id: branchId } : undefined;
     Promise.all([
-      getAllInvoicePayments(params).then((r) => r.data || []).catch(() => []),
+      getAllInvoicePayments().then((r) => r.data || []).catch(() => []),
       getCompanySettings().then((r) => r.data || {}).catch(() => ({})),
     ]).then(([payments, settings]) => {
       setList(payments);

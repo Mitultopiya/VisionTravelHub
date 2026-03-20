@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
-import { getHotels, getCities, createHotel, updateHotel, deleteHotel, getBranches } from '../../../services/api';
+import { useState, useEffect, useMemo } from 'react';
+import { getHotels, getCities, createHotel, updateHotel, deleteHotel } from '../../../services/api';
 import Loading from '../../../components/Loading';
 import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
 import Modal from '../../../components/ui/Modal';
 import { useToast } from '../../../context/ToastContext';
 import { getSelectedBranchId, branchParams } from '../../../utils/branch';
+import { filterCitiesByState, getCityById, getStateByCityId, getUniqueStates } from '../../../utils/cities';
 
 export default function Hotels() {
   const { toast } = useToast();
@@ -13,7 +14,6 @@ export default function Hotels() {
   const [cities, setCities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, data: null });
-  const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(() => getSelectedBranchId());
 
   const monthNames = [
@@ -37,14 +37,16 @@ export default function Hotels() {
   }, {});
 
   const [form, setForm] = useState({
-    branch_id: '',
     name: '',
+    state_name: '',
     city_id: '',
     address: '',
     contact: '',
     contact_person: '',
     contact_mobile: '',
+    hotel_star: '',
     room_type: '',
+    extra_adult_price: '',
     base_price: '',
     markup_price: '',
     price: '',
@@ -62,7 +64,6 @@ export default function Hotels() {
   };
   useEffect(() => { load(); }, [branchId]);
   useEffect(() => {
-    getBranches().then((r) => setBranches(r.data || [])).catch(() => setBranches([]));
     const onBranch = () => setBranchId(getSelectedBranchId());
     window.addEventListener('vth_branch_changed', onBranch);
     return () => window.removeEventListener('vth_branch_changed', onBranch);
@@ -70,14 +71,16 @@ export default function Hotels() {
 
   const openAdd = () => {
     setForm({
-      branch_id: branchId !== 'all' ? String(branchId) : '',
       name: '',
+      state_name: '',
       city_id: '',
       address: '',
       contact: '',
       contact_person: '',
       contact_mobile: '',
+      hotel_star: '',
       room_type: '',
+      extra_adult_price: '',
       base_price: '',
       markup_price: '',
       price: '',
@@ -102,14 +105,20 @@ export default function Hotels() {
       });
     }
     setForm({
-      branch_id: row.branch_id ? String(row.branch_id) : (branchId !== 'all' ? String(branchId) : ''),
       name: row.name || '',
+      state_name: getStateByCityId(cities, row.city_id),
       city_id: row.city_id ?? '',
       address: row.address || '',
       contact: row.contact || '',
       contact_person,
       contact_mobile,
+      hotel_star: (() => {
+        const text = String(row.room_type || '').toLowerCase();
+        const m = text.match(/([1-5])\s*\*|([1-5])\s*star/);
+        return m?.[1] || m?.[2] || '';
+      })(),
       room_type: row.room_type || '',
+      extra_adult_price: row.extra_adult_price != null ? String(row.extra_adult_price) : '',
       base_price: row.base_price != null ? String(row.base_price) : '',
       markup_price: row.markup_price != null ? String(row.markup_price) : '',
       price: row.price != null ? String(row.price) : '',
@@ -131,11 +140,11 @@ export default function Hotels() {
 
     const payload = {
       ...form,
+      room_type: form.room_type || (form.hotel_star ? `${form.hotel_star} Star` : ''),
       contact: contactCombined,
       city_id: form.city_id ? Number(form.city_id) : null,
       price: finalPrice || null,
       month_prices: form.month_prices,
-      branch_id: form.branch_id ? Number(form.branch_id) : undefined,
     };
     (modal.data ? updateHotel(modal.data.id, payload) : createHotel(payload))
       .then(() => { toast(modal.data ? 'Hotel updated' : 'Hotel added'); setModal({ open: false, data: null }); load(); })
@@ -148,7 +157,10 @@ export default function Hotels() {
     deleteHotel(row.id).then(() => { toast('Hotel deleted'); load(); }).catch(() => toast('Delete failed', 'error'));
   };
 
-  const getCityName = (id) => cities.find((c) => c.id === id)?.name || '-';
+  const states = useMemo(() => getUniqueStates(cities), [cities]);
+  const filteredCities = useMemo(() => filterCitiesByState(cities, form.state_name), [cities, form.state_name]);
+  const getCityName = (id) => getCityById(cities, id)?.name || '-';
+  const getStateName = (id) => getStateByCityId(cities, id) || '-';
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -167,122 +179,119 @@ export default function Hotels() {
           <div className="divide-y divide-slate-100">
             {Object.entries(
               list.reduce((acc, row) => {
-                const state = getCityName(row.city_id);
+                const state = getStateName(row.city_id) || 'Other';
                 if (!acc[state]) acc[state] = [];
                 acc[state].push(row);
                 return acc;
               }, {})
             ).map(([stateName, hotelsInState]) => (
-              <div key={stateName} className="px-4 sm:px-6 py-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-slate-800">
-                    {stateName}
-                  </h2>
+              <details key={stateName} className="group px-4 sm:px-6 py-3">
+                <summary className="cursor-pointer list-none flex items-center justify-between py-2">
+                  <h2 className="text-sm font-semibold text-slate-800">{stateName}</h2>
                   <span className="text-xs text-slate-500">
                     {hotelsInState.length} hotel{hotelsInState.length > 1 ? 's' : ''}
                   </span>
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {Object.entries(
+                    hotelsInState.reduce((acc, row) => {
+                      const city = getCityName(row.city_id) || 'Other City';
+                      if (!acc[city]) acc[city] = [];
+                      acc[city].push(row);
+                      return acc;
+                    }, {})
+                  ).map(([cityName, cityHotels]) => (
+                    <details key={`${stateName}-${cityName}`} className="ml-2 border border-slate-200 rounded-lg">
+                      <summary className="cursor-pointer list-none px-3 py-2 flex items-center justify-between bg-slate-50 rounded-lg">
+                        <span className="text-sm font-medium text-slate-700">{cityName}</span>
+                        <span className="text-xs text-slate-500">{cityHotels.length}</span>
+                      </summary>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[560px]">
+                          <thead>
+                            <tr className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                              <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Name</th>
+                              <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Room Type</th>
+                              <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Extra Adult</th>
+                              <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Price</th>
+                              <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Contact</th>
+                              <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {cityHotels.map((row) => (
+                              <tr key={row.id} className="hover:bg-teal-50/40 transition-colors">
+                                <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">{row.name || '-'}</td>
+                                <td className="px-5 py-3.5 text-sm text-slate-600">{row.room_type || '-'}</td>
+                                <td className="px-5 py-3.5 text-sm text-right text-slate-700">
+                                  {row.extra_adult_price != null ? `₹${Number(row.extra_adult_price).toLocaleString()}` : '-'}
+                                </td>
+                                <td className="px-5 py-3.5 text-sm text-right font-medium text-slate-800">
+                                  {row.price != null ? `₹${Number(row.price).toLocaleString()}` : '-'}
+                                </td>
+                                <td className="px-5 py-3.5 text-sm text-slate-600">{row.contact || '-'}</td>
+                                <td className="px-5 py-3.5 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button onClick={() => openEdit(row)} className="px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition">Edit</button>
+                                    <button onClick={() => handleDelete(row)} className="px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition">Delete</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  ))}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[640px]">
-                    <thead>
-                      <tr className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
-                        <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Name
-                        </th>
-                        <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Branch
-                        </th>
-                        <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Room Type
-                        </th>
-                        <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Price
-                        </th>
-                        <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Contact
-                        </th>
-                        <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {hotelsInState.map((row) => (
-                        <tr key={row.id} className="hover:bg-teal-50/40 transition-colors">
-                          <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">
-                            {row.name || '-'}
-                          </td>
-                          <td className="px-5 py-3.5 text-sm text-slate-600">
-                            {row.branch_name || '-'}
-                          </td>
-                          <td className="px-5 py-3.5 text-sm text-slate-600">
-                            {row.room_type || '-'}
-                          </td>
-                          <td className="px-5 py-3.5 text-sm text-right font-medium text-slate-800">
-                            {row.price != null ? `₹${Number(row.price).toLocaleString()}` : '-'}
-                            {(row.base_price != null || row.markup_price != null) && (
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                {`Base: ₹${Number(row.base_price || 0).toLocaleString()} • Markup: ₹${Number(row.markup_price || 0).toLocaleString()}`}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-5 py-3.5 text-sm text-slate-600">
-                            {row.contact || '-'}
-                          </td>
-                          <td className="px-5 py-3.5 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => openEdit(row)}
-                                className="px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => handleDelete(row)}
-                                className="px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              </details>
             ))}
           </div>
         )}
       </div>
       <Modal open={modal.open} onClose={() => setModal({ open: false, data: null })} title={modal.data ? 'Edit Hotel' : 'Add Hotel'} size="lg">
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Branch *</label>
-            <select
-              value={form.branch_id || (branchId !== 'all' ? String(branchId) : '')}
-              onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
-              required
-            >
-              <option value="">— Select Branch —</option>
-              {branches.map((b) => <option key={b.id} value={String(b.id)}>{b.name} ({b.code})</option>)}
-            </select>
-          </div>
           <Input label="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+            <select value={form.state_name} onChange={(e) => setForm({ ...form, state_name: e.target.value, city_id: '' })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500">
+              <option value="">— Select state —</option>
+              {states.map((stateName) => <option key={stateName} value={stateName}>{stateName}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
             <select value={form.city_id} onChange={(e) => setForm({ ...form, city_id: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500">
-              <option value="">— Select —</option>
-              {cities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="">— Select city —</option>
+              {filteredCities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Hotel Star</label>
+              <select
+                value={form.hotel_star}
+                onChange={(e) => setForm((prev) => ({ ...prev, hotel_star: e.target.value, room_type: e.target.value ? `${e.target.value} Star` : prev.room_type }))}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">— Select star —</option>
+                <option value="1">1 Star</option>
+                <option value="2">2 Star</option>
+                <option value="3">3 Star</option>
+                <option value="4">4 Star</option>
+                <option value="5">5 Star</option>
+              </select>
+            </div>
             <Input
-              label="Room Type"
-              value={form.room_type}
-              onChange={(e) => setForm({ ...form, room_type: e.target.value })}
+              label="Extra Adult Price"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.extra_adult_price}
+              onChange={(e) => setForm({ ...form, extra_adult_price: e.target.value })}
             />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Base Price"
               type="number"

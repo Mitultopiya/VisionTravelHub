@@ -1,15 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getVehicles, getCities, createVehicle, updateVehicle, deleteVehicle } from '../../../services/api';
 import Loading from '../../../components/Loading';
 import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
 import Modal from '../../../components/ui/Modal';
 import { useToast } from '../../../context/ToastContext';
-
-const getSelectedBranchId = () => {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('vth_selected_branch_id') || '';
-};
+import { getSelectedBranchId, branchParams } from '../../../utils/branch';
+import { filterCitiesByState, getCityById, getStateByCityId, getUniqueStates } from '../../../utils/cities';
 
 export default function Vehicles() {
   const { toast } = useToast();
@@ -17,6 +14,7 @@ export default function Vehicles() {
   const [cities, setCities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, data: null });
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
 
   const monthNames = [
     'January',
@@ -42,7 +40,9 @@ export default function Vehicles() {
     name: '',
     type: '',
     capacity: '',
+    state_name: '',
     city_id: '',
+    city_ids: [],
     base_price: '',
     markup_price: '',
     price: '',
@@ -54,8 +54,7 @@ export default function Vehicles() {
 
   const load = () => {
     setLoading(true);
-    const branchId = getSelectedBranchId();
-    const params = branchId ? { branch_id: branchId } : undefined;
+    const params = branchParams(branchId);
     Promise.all([getVehicles(params), getCities(params)])
       .then(([v, c]) => {
         setList(v.data || []);
@@ -63,14 +62,21 @@ export default function Vehicles() {
       })
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [branchId]);
+  useEffect(() => {
+    const onBranch = () => setBranchId(getSelectedBranchId());
+    window.addEventListener('vth_branch_changed', onBranch);
+    return () => window.removeEventListener('vth_branch_changed', onBranch);
+  }, []);
 
   const openAdd = () => {
     setForm({
       name: '',
       type: '',
       capacity: '',
+      state_name: '',
       city_id: '',
+      city_ids: [],
       base_price: '',
       markup_price: '',
       price: '',
@@ -100,7 +106,9 @@ export default function Vehicles() {
       name: row.name || '',
       type: row.type || '',
       capacity: row.capacity ?? '',
+      state_name: getStateByCityId(cities, row.city_id),
       city_id: row.city_id ?? '',
+      city_ids: row.city_id ? [String(row.city_id)] : [],
       base_price: row.base_price != null ? String(row.base_price) : '',
       markup_price: row.markup_price != null ? String(row.markup_price) : '',
       price: row.price != null ? String(row.price) : '',
@@ -114,26 +122,40 @@ export default function Vehicles() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setSaving(true);
-    const branchId = getSelectedBranchId();
     const contactCombined = form.contact_person || form.contact_mobile
       ? `${form.contact_person || ''}|${form.contact_mobile || ''}`
       : undefined;
     const base = Number(form.base_price || 0);
     const markup = Number(form.markup_price || 0);
     const finalPrice = base + markup || Number(form.price || 0) || 0;
-    const payload = {
+    const basePayload = {
       ...form,
       contact: contactCombined,
       capacity: form.capacity ? Number(form.capacity) : null,
       base_price: form.base_price ? Number(form.base_price) : null,
       markup_price: form.markup_price ? Number(form.markup_price) : null,
       price: finalPrice || null,
-      city_id: form.city_id ? Number(form.city_id) : null,
       month_prices: form.month_prices,
-      ...(branchId ? { branch_id: Number(branchId) } : {}),
     };
-    (modal.data ? updateVehicle(modal.data.id, payload) : createVehicle(payload))
-      .then(() => { toast(modal.data ? 'Vehicle updated' : 'Vehicle added'); setModal({ open: false, data: null }); load(); })
+    const selectedCityIds = Array.isArray(form.city_ids)
+      ? form.city_ids.map((id) => Number(id)).filter((n) => Number.isFinite(n) && n > 0)
+      : [];
+    if (!modal.data && selectedCityIds.length === 0) {
+      toast('Select at least one city', 'error');
+      setSaving(false);
+      return;
+    }
+
+    const req = modal.data
+      ? updateVehicle(modal.data.id, { ...basePayload, city_id: form.city_id ? Number(form.city_id) : null })
+      : Promise.all(selectedCityIds.map((cid) => createVehicle({ ...basePayload, city_id: cid })));
+
+    req
+      .then(() => {
+        toast(modal.data ? 'Vehicle updated' : `Vehicle added for ${selectedCityIds.length} city${selectedCityIds.length > 1 ? 'ies' : ''}`);
+        setModal({ open: false, data: null });
+        load();
+      })
       .catch((err) => toast(err.response?.data?.message || 'Failed', 'error'))
       .finally(() => setSaving(false));
   };
@@ -143,7 +165,10 @@ export default function Vehicles() {
     deleteVehicle(row.id).then(() => { toast('Vehicle deleted'); load(); }).catch(() => toast('Delete failed', 'error'));
   };
 
-  const getCityName = (id) => cities.find((c) => c.id === id)?.name || '-';
+  const states = useMemo(() => getUniqueStates(cities), [cities]);
+  const filteredCities = useMemo(() => filterCitiesByState(cities, form.state_name), [cities, form.state_name]);
+  const getCityName = (id) => getCityById(cities, id)?.name || '-';
+  const getStateName = (id) => getStateByCityId(cities, id) || '-';
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -162,84 +187,68 @@ export default function Vehicles() {
           <div className="divide-y divide-slate-100">
             {Object.entries(
               list.reduce((acc, row) => {
-                const state = getCityName(row.city_id);
+                const state = getStateName(row.city_id) || 'Other';
                 if (!acc[state]) acc[state] = [];
                 acc[state].push(row);
                 return acc;
               }, {})
             ).map(([stateName, vehiclesInState]) => (
-              <div key={stateName} className="px-4 sm:px-6 py-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-slate-800">
-                    {stateName}
-                  </h2>
+              <details key={stateName} className="group px-4 sm:px-6 py-3">
+                <summary className="cursor-pointer list-none flex items-center justify-between py-2">
+                  <h2 className="text-sm font-semibold text-slate-800">{stateName}</h2>
                   <span className="text-xs text-slate-500">
                     {vehiclesInState.length} vehicle{vehiclesInState.length > 1 ? 's' : ''}
                   </span>
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {Object.entries(
+                    vehiclesInState.reduce((acc, row) => {
+                      const city = getCityName(row.city_id) || 'Other City';
+                      if (!acc[city]) acc[city] = [];
+                      acc[city].push(row);
+                      return acc;
+                    }, {})
+                  ).map(([cityName, cityVehicles]) => (
+                    <details key={`${stateName}-${cityName}`} className="ml-2 border border-slate-200 rounded-lg">
+                      <summary className="cursor-pointer list-none px-3 py-2 flex items-center justify-between bg-slate-50 rounded-lg">
+                        <span className="text-sm font-medium text-slate-700">{cityName}</span>
+                        <span className="text-xs text-slate-500">{cityVehicles.length}</span>
+                      </summary>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[520px]">
+                          <thead>
+                            <tr className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                              <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Name</th>
+                              <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Type</th>
+                              <th className="text-center px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Capacity</th>
+                              <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Price</th>
+                              <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {cityVehicles.map((row) => (
+                              <tr key={row.id} className="hover:bg-teal-50/40 transition-colors">
+                                <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">{row.name || '-'}</td>
+                                <td className="px-5 py-3.5 text-sm text-slate-600">{row.type || '-'}</td>
+                                <td className="px-5 py-3.5 text-sm text-center text-slate-600">{row.capacity ?? '-'}</td>
+                                <td className="px-5 py-3.5 text-sm text-right font-medium text-slate-800">
+                                  {row.price != null ? `₹${Number(row.price).toLocaleString()}` : '-'}
+                                </td>
+                                <td className="px-5 py-3.5 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button onClick={() => openEdit(row)} className="px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition">Edit</button>
+                                    <button onClick={() => handleDelete(row)} className="px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition">Delete</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  ))}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[560px]">
-                    <thead>
-                      <tr className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
-                        <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Name
-                        </th>
-                        <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Type
-                        </th>
-                        <th className="text-center px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Capacity
-                        </th>
-                        <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Price
-                        </th>
-                        <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {vehiclesInState.map((row) => (
-                        <tr key={row.id} className="hover:bg-teal-50/40 transition-colors">
-                          <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">
-                            {row.name || '-'}
-                          </td>
-                          <td className="px-5 py-3.5 text-sm text-slate-600">
-                            {row.type || '-'}
-                          </td>
-                          <td className="px-5 py-3.5 text-sm text-center text-slate-600">
-                            {row.capacity ?? '-'}
-                          </td>
-                          <td className="px-5 py-3.5 text-sm text-right font-medium text-slate-800">
-                            {row.price != null ? `₹${Number(row.price).toLocaleString()}` : '-'}
-                            {(row.base_price != null || row.markup_price != null) && (
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                {`Base: ₹${Number(row.base_price || 0).toLocaleString()} • Markup: ₹${Number(row.markup_price || 0).toLocaleString()}`}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-5 py-3.5 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => openEdit(row)}
-                                className="px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => handleDelete(row)}
-                                className="px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              </details>
             ))}
           </div>
         )}
@@ -252,17 +261,87 @@ export default function Vehicles() {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
             <select
-              value={form.city_id}
-              onChange={(e) => setForm({ ...form, city_id: e.target.value })}
+              value={form.state_name}
+              onChange={(e) => setForm({ ...form, state_name: e.target.value, city_id: '' })}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
             >
-              <option value="">— Select —</option>
-              {cities.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+              <option value="">— Select state —</option>
+              {states.map((stateName) => (
+                <option key={stateName} value={stateName}>
+                  {stateName}
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+            {modal.data ? (
+              <select
+                value={form.city_id}
+                onChange={(e) => setForm({ ...form, city_id: e.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">— Select city —</option>
+                {filteredCities.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="rounded-lg border border-slate-300 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-slate-600 font-medium">
+                    Select cities for {form.state_name || 'selected state'}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, city_ids: filteredCities.map((c) => String(c.id)) }))}
+                      className="text-xs text-primary-600 hover:text-primary-700"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, city_ids: [] }))}
+                      className="text-xs text-slate-500 hover:text-slate-700"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {filteredCities.length === 0 ? (
+                    <p className="text-xs text-slate-400">No cities found for this state.</p>
+                  ) : (
+                    filteredCities.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={(form.city_ids || []).includes(String(c.id))}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setForm((prev) => ({
+                              ...prev,
+                              city_ids: checked
+                                ? [...(prev.city_ids || []), String(c.id)]
+                                : (prev.city_ids || []).filter((id) => id !== String(c.id)),
+                            }));
+                          }}
+                        />
+                        <span>{c.name}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+            {!modal.data && (
+              <p className="mt-1 text-xs text-slate-500">
+                State-wise selection: choose one state, then select one or more cities.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input

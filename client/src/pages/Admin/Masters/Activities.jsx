@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getActivities, getCities, createActivity, updateActivity, deleteActivity, uploadMastersFile, uploadBaseUrl } from '../../../services/api';
 import Loading from '../../../components/Loading';
 import Button from '../../../components/ui/Button';
@@ -6,11 +6,8 @@ import Input from '../../../components/ui/Input';
 import Modal from '../../../components/ui/Modal';
 import FileUpload from '../../../components/FileUpload';
 import { useToast } from '../../../context/ToastContext';
-
-const getSelectedBranchId = () => {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('vth_selected_branch_id') || '';
-};
+import { getSelectedBranchId, branchParams } from '../../../utils/branch';
+import { filterCitiesByState, getCityById, getStateByCityId, getUniqueStates } from '../../../utils/cities';
 
 export default function Activities() {
   const { toast } = useToast();
@@ -18,6 +15,7 @@ export default function Activities() {
   const [cities, setCities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, data: null });
+  const [branchId, setBranchId] = useState(() => getSelectedBranchId());
 
   const monthNames = [
     'January',
@@ -42,6 +40,7 @@ export default function Activities() {
   const [form, setForm] = useState({
     name: '',
     description: '',
+    state_name: '',
     city_id: '',
     base_price: '',
     markup_price: '',
@@ -56,19 +55,24 @@ export default function Activities() {
 
   const load = () => {
     setLoading(true);
-    const branchId = getSelectedBranchId();
-    const params = branchId ? { branch_id: branchId } : undefined;
+    const params = branchParams(branchId);
     Promise.all([getActivities(params), getCities(params)]).then(([a, c]) => {
       setList(a.data || []);
       setCities(c.data || []);
     }).finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [branchId]);
+  useEffect(() => {
+    const onBranch = () => setBranchId(getSelectedBranchId());
+    window.addEventListener('vth_branch_changed', onBranch);
+    return () => window.removeEventListener('vth_branch_changed', onBranch);
+  }, []);
 
   const openAdd = () => {
     setForm({
       name: '',
       description: '',
+      state_name: '',
       city_id: '',
       base_price: '',
       markup_price: '',
@@ -99,6 +103,7 @@ export default function Activities() {
     setForm({
       name: row.name || '',
       description: row.description || '',
+      state_name: getStateByCityId(cities, row.city_id),
       city_id: row.city_id ?? '',
       base_price: row.base_price != null ? String(row.base_price) : '',
       markup_price: row.markup_price != null ? String(row.markup_price) : '',
@@ -127,7 +132,6 @@ export default function Activities() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setSaving(true);
-    const branchId = getSelectedBranchId();
     const contactCombined = form.contact_person || form.contact_mobile
       ? `${form.contact_person || ''}|${form.contact_mobile || ''}`
       : undefined;
@@ -143,7 +147,6 @@ export default function Activities() {
       month_prices: form.month_prices,
       contact: contactCombined,
       image_url: form.image_url || null,
-      ...(branchId ? { branch_id: Number(branchId) } : {}),
     };
     (modal.data ? updateActivity(modal.data.id, payload) : createActivity(payload))
       .then(() => { toast(modal.data ? 'Activity updated' : 'Activity added'); setModal({ open: false, data: null }); load(); })
@@ -156,7 +159,10 @@ export default function Activities() {
     deleteActivity(row.id).then(() => { toast('Activity deleted'); load(); }).catch(() => toast('Delete failed', 'error'));
   };
 
-  const getCityName = (id) => cities.find((c) => c.id === id)?.name || '-';
+  const states = useMemo(() => getUniqueStates(cities), [cities]);
+  const filteredCities = useMemo(() => filterCitiesByState(cities, form.state_name), [cities, form.state_name]);
+  const getCityName = (id) => getCityById(cities, id)?.name || '-';
+  const getStateName = (id) => getStateByCityId(cities, id) || '-';
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -168,47 +174,76 @@ export default function Activities() {
         {loading ? <Loading /> : list.length === 0 ? (
           <div className="py-16 text-center text-slate-400 text-sm">No activities. Add your first activity.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px]">
-              <thead>
-                <tr className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
-                  <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Image</th>
-                  <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Name</th>
-                  <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Description</th>
-                  <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Price</th>
-                  <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">State</th>
-                  <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {list.map((row, i) => (
-                  <tr key={row.id || i} className="hover:bg-teal-50/40 transition-colors">
-                    <td className="px-5 py-3">
-                      {row.image_url
-                        ? <img src={(uploadBaseUrl || '') + row.image_url} alt="" className="h-10 w-10 object-cover rounded-lg border border-slate-200" />
-                        : <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xs">No img</div>}
-                    </td>
-                    <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">{row.name || '-'}</td>
-                    <td className="px-5 py-3.5 text-sm text-slate-500 max-w-[200px] truncate">{row.description || '-'}</td>
-                    <td className="px-5 py-3.5 text-sm text-right font-medium text-slate-800">
-                      {row.price != null ? `₹${Number(row.price).toLocaleString()}` : '-'}
-                      {(row.base_price != null || row.markup_price != null) && (
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          {`Base: ₹${Number(row.base_price || 0).toLocaleString()} • Markup: ₹${Number(row.markup_price || 0).toLocaleString()}`}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-slate-600">{getCityName(row.city_id)}</td>
-                    <td className="px-5 py-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button onClick={() => openEdit(row)} className="px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition">Edit</button>
-                        <button onClick={() => handleDelete(row)} className="px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition">Delete</button>
+          <div className="divide-y divide-slate-100">
+            {Object.entries(
+              list.reduce((acc, row) => {
+                const state = getStateName(row.city_id) || 'Other';
+                if (!acc[state]) acc[state] = [];
+                acc[state].push(row);
+                return acc;
+              }, {})
+            ).map(([stateName, activitiesInState]) => (
+              <details key={stateName} className="group px-4 sm:px-6 py-3">
+                <summary className="cursor-pointer list-none flex items-center justify-between py-2">
+                  <h2 className="text-sm font-semibold text-slate-800">{stateName}</h2>
+                  <span className="text-xs text-slate-500">
+                    {activitiesInState.length} activit{activitiesInState.length === 1 ? 'y' : 'ies'}
+                  </span>
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {Object.entries(
+                    activitiesInState.reduce((acc, row) => {
+                      const city = getCityName(row.city_id) || 'Other City';
+                      if (!acc[city]) acc[city] = [];
+                      acc[city].push(row);
+                      return acc;
+                    }, {})
+                  ).map(([cityName, cityActivities]) => (
+                    <details key={`${stateName}-${cityName}`} className="ml-2 border border-slate-200 rounded-lg">
+                      <summary className="cursor-pointer list-none px-3 py-2 flex items-center justify-between bg-slate-50 rounded-lg">
+                        <span className="text-sm font-medium text-slate-700">{cityName}</span>
+                        <span className="text-xs text-slate-500">{cityActivities.length}</span>
+                      </summary>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[520px]">
+                          <thead>
+                            <tr className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                              <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Image</th>
+                              <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Name</th>
+                              <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Description</th>
+                              <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Price</th>
+                              <th className="text-right px-5 py-3.5 text-xs font-semibold uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {cityActivities.map((row, i) => (
+                              <tr key={row.id || i} className="hover:bg-teal-50/40 transition-colors">
+                                <td className="px-5 py-3">
+                                  {row.image_url
+                                    ? <img src={(uploadBaseUrl || '') + row.image_url} alt="" className="h-10 w-10 object-cover rounded-lg border border-slate-200" />
+                                    : <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xs">No img</div>}
+                                </td>
+                                <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">{row.name || '-'}</td>
+                                <td className="px-5 py-3.5 text-sm text-slate-500 max-w-[200px] truncate">{row.description || '-'}</td>
+                                <td className="px-5 py-3.5 text-sm text-right font-medium text-slate-800">
+                                  {row.price != null ? `₹${Number(row.price).toLocaleString()}` : '-'}
+                                </td>
+                                <td className="px-5 py-3.5 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button onClick={() => openEdit(row)} className="px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition">Edit</button>
+                                    <button onClick={() => handleDelete(row)} className="px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition">Delete</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </details>
+                  ))}
+                </div>
+              </details>
+            ))}
           </div>
         )}
       </div>
@@ -221,9 +256,16 @@ export default function Activities() {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+            <select value={form.state_name} onChange={(e) => setForm({ ...form, state_name: e.target.value, city_id: '' })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500">
+              <option value="">— Select state —</option>
+              {states.map((stateName) => <option key={stateName} value={stateName}>{stateName}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
             <select value={form.city_id} onChange={(e) => setForm({ ...form, city_id: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500">
-              <option value="">— Select —</option>
-              {cities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="">— Select city —</option>
+              {filteredCities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

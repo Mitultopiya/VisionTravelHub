@@ -6,13 +6,14 @@ import AdminLayout from './components/AdminLayout';
 import StaffLayout from './components/StaffLayout';
 import AdminDashboard from './pages/Admin/Dashboard';
 import AdminCustomers from './pages/Admin/Customers';
-import AdminPackages from './pages/Admin/Packages';
-import AdminPackageBuilder from './pages/Admin/PackageBuilder';
 import AdminBookings from './pages/Admin/Bookings';
 import AdminPreferredItems from './pages/Admin/PreferredItems';
 import AdminQuotations from './pages/Admin/Quotations';
 import AdminInvoices from './pages/Admin/Invoices';
 import AdminPaymentSlips from './pages/Admin/PaymentSlips';
+import AdminItinerary from './pages/Admin/Itinerary';
+import AdminRateCalculator from './pages/Admin/RateCalculator';
+import AdminRateCalculatorPreview from './pages/Admin/RateCalculatorPreview';
 import AdminReports from './pages/Admin/Reports';
 import AdminStaff from './pages/Admin/Staff';
 import AdminSettings from './pages/Admin/Settings';
@@ -23,6 +24,9 @@ import AdminActivities from './pages/Admin/Masters/Activities';
 import StaffDashboard from './pages/Staff/Dashboard';
 import StaffMyBookings from './pages/Staff/MyBookings';
 import StaffBookingDetails from './pages/Staff/BookingDetails';
+import StaffCustomers from './pages/Admin/Customers';
+import StaffRateCalculator from './pages/Admin/RateCalculator';
+import StaffRateCalculatorPreview from './pages/Admin/RateCalculatorPreview';
 
 function ProtectedRoute({ children, allowRoles }) {
   const user = getStoredUser();
@@ -51,10 +55,13 @@ function App() {
       <Route path="/admin" element={<ProtectedRoute allowRoles={['admin', 'manager']}><AdminLayout /></ProtectedRoute>}>
         <Route index element={<AdminDashboard />} />
         <Route path="customers" element={<AdminCustomers />} />
-        <Route path="packages" element={<AdminPackages />} />
-        <Route path="package-builder" element={<AdminPackageBuilder />} />
-        <Route path="package-builder/:id" element={<AdminPackageBuilder />} />
+        <Route path="packages" element={<Navigate to="/admin" replace />} />
+        <Route path="package-builder" element={<Navigate to="/admin" replace />} />
+        <Route path="package-builder/:id" element={<Navigate to="/admin" replace />} />
         <Route path="bookings" element={<AdminBookings />} />
+        <Route path="itinerary" element={<AdminItinerary />} />
+        <Route path="rate-calculator" element={<AdminRateCalculator />} />
+        <Route path="rate-calculator/preview" element={<AdminRateCalculatorPreview />} />
         <Route path="preferred-items" element={<AdminPreferredItems />} />
         <Route path="quotations" element={<AdminQuotations />} />
         <Route path="invoice" element={<AdminInvoices />} />
@@ -71,6 +78,11 @@ function App() {
 
       <Route path="/staff" element={<ProtectedRoute allowRoles={['staff']}><StaffLayout /></ProtectedRoute>}>
         <Route index element={<StaffDashboard />} />
+        <Route path="customers" element={<StaffCustomers />} />
+        <Route path="invoice" element={<AdminInvoices />} />
+        <Route path="payment-slip" element={<AdminPaymentSlips />} />
+        <Route path="rate-calculator" element={<StaffRateCalculator />} />
+        <Route path="rate-calculator/preview" element={<StaffRateCalculatorPreview />} />
         <Route path="bookings" element={<StaffMyBookings />} />
         <Route path="bookings/:id" element={<StaffBookingDetails />} />
       </Route>

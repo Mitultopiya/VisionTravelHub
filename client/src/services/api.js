@@ -81,6 +81,13 @@ export const uploadPackageFile = (file) => {
   return api.post('/packages/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
 };
 
+// Itinerary Templates (admin)
+export const getItineraryTemplates = (params) => api.get('/admin/itinerary-template', { params });
+export const createItineraryTemplate = (data) => api.post('/admin/itinerary-template', data);
+export const updateItineraryTemplate = (id, data) => api.put(`/admin/itinerary-template/${id}`, data);
+export const deleteItineraryTemplate = (id) => api.delete(`/admin/itinerary-template/${id}`);
+export const getItineraryTemplateCities = (params) => api.get('/admin/itinerary-template/cities', { params });
+
 // Bookings
 export const getBookings = (params) => api.get('/bookings', { params });
 export const getBooking = (id) => api.get(`/bookings/${id}`);

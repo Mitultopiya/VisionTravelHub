@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   getInvoices,
   getInvoice,
@@ -9,14 +9,18 @@ import {
   addInvoicePayment,
   getCustomers,
   getBookings,
-  getPackages,
+  getCities,
+  getHotels,
+  getActivities,
+  getItineraryTemplates,
   getStaff,
-  getBranches,
+  getVehicles,
   getCompanySettings,
   downloadInvoicePdf,
 } from '../../services/api';
 import { getStoredUser } from '../../utils/auth';
 import { getSelectedBranchId, branchParams } from '../../utils/branch';
+import { getUniqueStates } from '../../utils/cities';
 import Loading from '../../components/Loading';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -74,6 +78,55 @@ const getTripDays = (start, end) => {
   return diff > 0 ? diff : 1;
 };
 
+const getPaxUnits = (couples, adults, children) => {
+  const c = Number(couples || 0);
+  const a = Number(adults || 0);
+  const ch = Number(children || 0);
+  return (c * 2) + (a * 0.5) + (ch * 0.25);
+};
+
+const parseItinerary = (value) => {
+  if (!value) return [];
+  return value
+    .split('/')
+    .map((chunk) => chunk.trim())
+    .map((chunk) => {
+      const match = chunk.match(/^(\d+)\s*N\s*(.+)$/i);
+      if (!match) return null;
+      return { nights: Number(match[1]), location: match[2].trim() };
+    })
+    .filter(Boolean);
+};
+
+const buildPlanFromDays = (days = []) => {
+  const validDays = (Array.isArray(days) ? days : []).filter((d) => d?.city_name && Number(d?.night_count) > 0);
+  if (!validDays.length) return '';
+  return validDays.map((d) => `${Number(d.night_count)}N ${d.city_name}`).join(' / ');
+};
+
+const getHotelStar = (roomType) => {
+  const text = String(roomType || '').toLowerCase();
+  const m = text.match(/([1-5])\s*\*|([1-5])\s*star/);
+  return m?.[1] || m?.[2] || '';
+};
+
+const getAutoEndDate = (startDate, nights) => {
+  if (!startDate || !Number(nights)) return '';
+  const start = new Date(startDate);
+  if (Number.isNaN(start.getTime())) return '';
+  start.setDate(start.getDate() + Number(nights) - 1);
+  return start.toISOString().slice(0, 10);
+};
+
+const TRIP_REFERENCE_HEADER = 'Trip Reference:';
+const stripTripReference = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const blocks = text.split(/\n{2,}/);
+  const filtered = blocks.filter((block) => !block.trim().startsWith(TRIP_REFERENCE_HEADER));
+  return filtered.join('\n\n').trim();
+};
+
 export default function Invoices() {
   const { toast } = useToast();
   const user = getStoredUser();
@@ -86,20 +139,28 @@ export default function Invoices() {
   const [paymentForm, setPaymentForm] = useState({ amount: '', mode: 'cash', reference: '' });
   const [customers, setCustomers] = useState([]);
   const [bookings, setBookings] = useState([]);
-  const [packages, setPackages] = useState([]);
+  const [itineraryTemplates, setItineraryTemplates] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [hotels, setHotels] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [activityMasters, setActivityMasters] = useState([]);
+  const [hotelStarFilter, setHotelStarFilter] = useState('');
+  const [hotelInfoRows, setHotelInfoRows] = useState([]);
+  const [transfers, setTransfers] = useState([{ vehicle: '', quantity: '1' }]);
+  const [activities, setActivities] = useState([{ activity: '' }]);
   const [staff, setStaff] = useState([]);
-  const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(() => getSelectedBranchId());
   const [nextNumber, setNextNumber] = useState('');
   const [saving, setSaving] = useState(false);
   const [paymentSettings, setPaymentSettings] = useState({});
   const [form, setForm] = useState({
-    branch_id: '',
     invoice_number: '',
     invoice_date: new Date().toISOString().slice(0, 10),
     due_date: '',
     booking_id: '',
-    package_id: '',
+    itinerary_id: '',
+    state_name: '',
+    nights: '',
     customer_id: '',
     place_of_supply: '',
     billing_address: '',
@@ -108,6 +169,7 @@ export default function Invoices() {
     travel_destination: '',
     travel_start_date: '',
     travel_end_date: '',
+    couples: '0',
     adults: '0',
     children: '0',
     package_name: '',
@@ -121,6 +183,9 @@ export default function Invoices() {
     status: 'draft',
     terms_text: '',
     company_gst: '',
+    company_contact: '7818814380',
+    company_name: 'Vision Travel Hub',
+    markup: '0',
     items: [emptyItem(), emptyItem()],
   });
 
@@ -138,9 +203,12 @@ export default function Invoices() {
     const params = branchId && branchId !== 'all' ? { limit: 500, branch_id: branchId } : { limit: 500 };
     getCustomers(params).then((r) => setCustomers(r.data?.data || r.data || [])).catch(() => {});
     getBookings({ limit: 200 }).then((r) => setBookings(r.data?.data || r.data || [])).catch(() => {});
-    getPackages().then((r) => setPackages(r.data || [])).catch(() => {});
+    getItineraryTemplates(params).then((r) => setItineraryTemplates((r.data || []).filter((t) => t.is_active))).catch(() => setItineraryTemplates([]));
+    getCities(params).then((r) => setCities(r.data || [])).catch(() => setCities([]));
+    getHotels(params).then((r) => setHotels(r.data || [])).catch(() => setHotels([]));
+    getVehicles(params).then((r) => setVehicles(r.data || [])).catch(() => setVehicles([]));
+    getActivities(params).then((r) => setActivityMasters(r.data || [])).catch(() => setActivityMasters([]));
     getStaff().then((r) => setStaff(r.data || [])).catch(() => {});
-    getBranches().then((r) => setBranches(r.data || [])).catch(() => setBranches([]));
     getCompanySettings().then((r) => setPaymentSettings(r.data || {})).catch(() => {});
 
     const onBranch = () => setBranchId(getSelectedBranchId());
@@ -158,12 +226,13 @@ export default function Invoices() {
     due.setDate(due.getDate() + 7);
     setForm({
       ...form,
-      branch_id: branchId !== 'all' ? String(branchId) : '',
       invoice_number: '',
       invoice_date: today,
       due_date: due.toISOString().slice(0, 10),
       booking_id: '',
-      package_id: '',
+      itinerary_id: '',
+      state_name: '',
+      nights: '',
       customer_id: '',
       place_of_supply: '',
       billing_address: '',
@@ -172,6 +241,7 @@ export default function Invoices() {
       travel_destination: '',
       travel_start_date: '',
       travel_end_date: '',
+      couples: '0',
       adults: '0',
       children: '0',
       package_name: '',
@@ -185,8 +255,15 @@ export default function Invoices() {
       status: 'draft',
       terms_text: '',
       company_gst: '',
+      company_contact: '7818814380',
+      company_name: 'Vision Travel Hub',
+      markup: '0',
       items: [emptyItem(), emptyItem()],
     });
+    setHotelStarFilter('');
+    setHotelInfoRows([]);
+    setTransfers([{ vehicle: '', quantity: '1' }]);
+    setActivities([{ activity: '' }]);
     setModal({ open: true });
   };
 
@@ -196,12 +273,13 @@ export default function Invoices() {
         const inv = r.data;
         setForm({
           ...form,
-          branch_id: inv.branch_id ? String(inv.branch_id) : (branchId !== 'all' ? String(branchId) : ''),
           invoice_number: inv.invoice_number || '',
           invoice_date: inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : form.invoice_date,
           due_date: inv.due_date ? String(inv.due_date).slice(0, 10) : form.due_date,
           booking_id: inv.booking_id ? String(inv.booking_id) : '',
-          package_id: '',
+          itinerary_id: '',
+          state_name: inv.state_name || '',
+          nights: '',
           customer_id: inv.customer_id ? String(inv.customer_id) : '',
           place_of_supply: inv.place_of_supply || '',
           billing_address: inv.billing_address || '',
@@ -210,13 +288,17 @@ export default function Invoices() {
           travel_destination: inv.travel_destination || '',
           travel_start_date: inv.travel_start_date ? String(inv.travel_start_date).slice(0, 10) : '',
           travel_end_date: inv.travel_end_date ? String(inv.travel_end_date).slice(0, 10) : '',
+          couples: '0',
           adults: String(inv.adults ?? 0),
           children: String(inv.children ?? 0),
           package_name: inv.package_name || '',
           hotel_category: inv.hotel_category || '',
           vehicle_type: inv.vehicle_type || '',
-          terms_text: inv.terms_text || '',
+          terms_text: stripTripReference(inv.terms_text || ''),
           company_gst: inv.company_gst || '',
+          company_contact: '7818814380',
+          company_name: 'Vision Travel Hub',
+          markup: '0',
           discount: String(inv.discount ?? 0),
           discount_type: inv.discount_type || 'flat',
           tax_percent: String(inv.tax_percent ?? 0),
@@ -230,6 +312,9 @@ export default function Invoices() {
             amount: String(i.amount ?? 0),
           })) : [emptyItem(), emptyItem()],
         });
+        setHotelStarFilter('');
+        setTransfers([{ vehicle: '', quantity: '1' }]);
+        setActivities([{ activity: '' }]);
         setEditingId(inv.id);
         setModal({ open: true });
       })
@@ -247,11 +332,9 @@ export default function Invoices() {
     setForm((f) => ({
       ...f,
       booking_id: String(bk.id),
-      package_id: bk.package_id ? String(bk.package_id) : '',
       customer_id: String(bk.customer_id),
       travel_start_date: bk.travel_start_date ? String(bk.travel_start_date).slice(0, 10) : f.travel_start_date,
       travel_end_date: bk.travel_end_date ? String(bk.travel_end_date).slice(0, 10) : f.travel_end_date,
-      package_name: bk.package_name || f.package_name,
     }));
     const cust = customers.find((c) => c.id === bk.customer_id);
     if (cust) {
@@ -260,7 +343,6 @@ export default function Invoices() {
         billing_address: cust.address || f.billing_address,
       }));
     }
-    if (bk.package_id) onPackageSelect(String(bk.package_id));
   };
 
   const onCustomerSelect = (customerId) => {
@@ -268,67 +350,264 @@ export default function Invoices() {
     if (cust) setForm((f) => ({ ...f, billing_address: cust.address || f.billing_address }));
   };
 
-  const onPackageSelect = (packageId) => {
-    if (!packageId) return;
-    const pkg = packages.find((p) => p.id === Number(packageId));
-    if (!pkg) return;
-    const packagePrice = Number(pkg.price || 0);
-    const hotelPrice = Number(pkg.default_hotel_price || 0);
-    const vehiclePrice = Number(pkg.default_vehicle_price || 0);
+  const onItinerarySelect = (itineraryId) => {
+    if (!itineraryId) return;
+    const selected = itineraryTemplates.find((item) => String(item.id) === String(itineraryId));
+    if (!selected) return;
+    const stops = (selected.days || []).length
+      ? selected.days.map((d) => ({ nights: Number(d.night_count || 0), location: d.city_name || '' })).filter((d) => d.location)
+      : parseItinerary(selected.plan || '');
+    const totalNights = stops.reduce((sum, s) => sum + Number(s.nights || 0), 0);
+    const plan = buildPlanFromDays(selected.days || []) || selected.plan || selected.title || '';
+    const destination = stops.map((s) => s.location).join(', ');
     setForm((f) => {
-      const adults = Number(f.adults) || 1;
-      const days = getTripDays(f.travel_start_date, f.travel_end_date);
-      const pkgQty = adults;
-      const hotelQty = days;
-      const vehicleQty = days;
+      let autoEndDate = f.travel_end_date;
+      if (f.travel_start_date && totalNights > 0) {
+        const start = new Date(f.travel_start_date);
+        if (!Number.isNaN(start.getTime())) {
+          start.setDate(start.getDate() + totalNights - 1);
+          autoEndDate = start.toISOString().slice(0, 10);
+        }
+      }
       return {
         ...f,
-        package_id: String(pkg.id),
-        package_name: pkg.name || pkg.title || f.package_name,
-        hotel_category: pkg.default_hotel_name || f.hotel_category,
-        vehicle_type: pkg.default_vehicle_name || f.vehicle_type,
-        items: [
-          {
-            description: `Package: ${pkg.name || pkg.title || 'Package'}`,
-            quantity: String(pkgQty),
-            rate: String(packagePrice),
-            amount: String(pkgQty * packagePrice),
-          },
-          {
-            description: `Hotel: ${pkg.default_hotel_name || 'Default'}`,
-            quantity: String(hotelQty),
-            rate: String(hotelPrice),
-            amount: String(hotelQty * hotelPrice),
-          },
-          {
-            description: `Vehicle: ${pkg.default_vehicle_name || 'Default'}`,
-            quantity: String(vehicleQty),
-            rate: String(vehiclePrice),
-            amount: String(vehicleQty * vehiclePrice),
-          },
-        ],
+        itinerary_id: String(selected.id),
+        state_name: selected.state_name || f.state_name,
+        nights: String(totalNights || f.nights || ''),
+        package_name: selected.title || plan || f.package_name,
+        travel_destination: destination || f.travel_destination,
+        travel_end_date: autoEndDate,
       };
     });
   };
 
   const recalcPackageItems = (formState) => {
-    const adults = Number(formState.adults) || 1;
-    const days = getTripDays(formState.travel_start_date, formState.travel_end_date);
-    const items = formState.items.map((it) => {
-      if (!it.description) return it;
-      const rate = Number(it.rate) || 0;
-      if (it.description.startsWith('Package:')) {
-        const qty = adults;
-        return { ...it, quantity: String(qty), amount: String(qty * rate) };
-      }
-      if (it.description.startsWith('Hotel:') || it.description.startsWith('Vehicle:')) {
-        const qty = days;
-        return { ...it, quantity: String(qty), amount: String(qty * rate) };
-      }
-      return it;
-    });
-    return { ...formState, items };
+    const autoEnd = getAutoEndDate(formState.travel_start_date, formState.nights);
+    return { ...formState, travel_end_date: autoEnd || formState.travel_end_date };
   };
+
+  const itineraryOptions = itineraryTemplates.map((t) => {
+    const days = Array.isArray(t.days) ? t.days : [];
+    const planLabel = buildPlanFromDays(days) || t.plan || t.title || `Itinerary ${t.id}`;
+    const total = days.length
+      ? days.reduce((sum, d) => sum + Number(d.night_count || 0), 0)
+      : Number(t.total_nights || 0);
+    return {
+      id: t.id,
+      label: planLabel,
+      stateName: t.state_name || '',
+      totalNights: total,
+    };
+  });
+  const stateOptions = getUniqueStates(itineraryTemplates.map((t) => ({ country: t.state_name })));
+  const stateFilteredItineraries = form.state_name
+    ? itineraryOptions.filter((item) => String(item.stateName || '').trim() === String(form.state_name).trim())
+    : [];
+  const nightsOptions = [...new Set(stateFilteredItineraries.map((item) => Number(item.totalNights || 0)).filter((n) => n > 0))].sort((a, b) => a - b);
+  const filteredItineraryOptions = form.nights
+    ? stateFilteredItineraries.filter((item) => Number(item.totalNights) === Number(form.nights))
+    : stateFilteredItineraries;
+  const selectedItineraryOption = itineraryOptions.find((item) => String(item.id) === String(form.itinerary_id));
+  const noItineraryForSelectedNights = Boolean(form.nights) && filteredItineraryOptions.length === 0;
+  const selectedItinerary = itineraryTemplates.find((item) => String(item.id) === String(form.itinerary_id));
+  const selectedStops = useMemo(() => (
+    selectedItinerary
+      ? ((selectedItinerary.days || []).length
+        ? selectedItinerary.days.map((d) => ({ location: d.city_name || '', nights: Number(d.night_count || 0) })).filter((d) => d.location)
+        : parseItinerary(selectedItinerary.plan || '').map((s) => ({ location: s.location, nights: Number(s.nights || 0) })))
+      : []
+  ), [selectedItinerary]);
+  const cityMetaById = useMemo(
+    () => Object.fromEntries((cities || []).map((c) => [Number(c.id), { name: c.name, state: c.country || '' }])),
+    [cities]
+  );
+  const stopNameSet = useMemo(
+    () => new Set(selectedStops.map((s) => String(s.location || '').trim().toLowerCase()).filter(Boolean)),
+    [selectedStops]
+  );
+  const hotelCategoryOptions = useMemo(() => {
+    const scoped = (hotels || []).filter((h) => {
+      const cityMeta = cityMetaById[Number(h.city_id)];
+      if (!cityMeta) return false;
+      const cityName = String(cityMeta.name || '').trim().toLowerCase();
+      if (stopNameSet.size) return stopNameSet.has(cityName);
+      if (form.state_name) return String(cityMeta.state || '').trim() === String(form.state_name).trim();
+      return true;
+    });
+    return [...new Set(scoped.map((h) => h.category || h.name).filter(Boolean))];
+  }, [hotels, cityMetaById, stopNameSet, form.state_name]);
+  const vehicleTypeOptions = useMemo(() => {
+    const scoped = (vehicles || []).filter((v) => {
+      const cityMeta = cityMetaById[Number(v.city_id)];
+      if (stopNameSet.size) {
+        const cityName = String(cityMeta?.name || '').trim().toLowerCase();
+        return stopNameSet.has(cityName);
+      }
+      if (!form.state_name) return true;
+      return String(cityMeta?.state || '').trim() === String(form.state_name).trim();
+    });
+    return [...new Set(scoped.map((v) => v.name || v.type).filter(Boolean))];
+  }, [vehicles, form.state_name, cityMetaById, stopNameSet]);
+  const hotelOptionsByLocation = useMemo(() => {
+    const grouped = {};
+    for (const hotel of hotels) {
+      const cityMeta = cityMetaById[Number(hotel.city_id)];
+      const location = cityMeta?.name;
+      if (!location) continue;
+      if (!grouped[location]) grouped[location] = [];
+      grouped[location].push({ name: hotel.name, star: getHotelStar(hotel.room_type) });
+    }
+    return grouped;
+  }, [hotels, cityMetaById]);
+  const activityOptions = useMemo(
+    () => [...new Set((activityMasters || []).map((a) => a.name).filter(Boolean))],
+    [activityMasters]
+  );
+  const activityRateMap = useMemo(
+    () => Object.fromEntries((activityMasters || []).map((a) => [String(a.name || '').toLowerCase(), Number(a.price || 0)])),
+    [activityMasters]
+  );
+  useEffect(() => {
+    if (form.hotel_category && !hotelCategoryOptions.includes(form.hotel_category)) {
+      setForm((prev) => ({ ...prev, hotel_category: '' }));
+    }
+    if (form.vehicle_type && !vehicleTypeOptions.includes(form.vehicle_type)) {
+      setForm((prev) => ({ ...prev, vehicle_type: '' }));
+    }
+  }, [hotelCategoryOptions, vehicleTypeOptions, form.hotel_category, form.vehicle_type]);
+  useEffect(() => {
+    setHotelInfoRows((prev) => {
+      const prevByLocation = new Map((prev || []).map((row) => [row.location, row]));
+      return selectedStops.map((s) => {
+        const existing = prevByLocation.get(s.location);
+        return existing ? { ...existing, location: s.location } : { location: s.location, hotel: '', meal: '' };
+      });
+    });
+  }, [selectedStops]);
+  useEffect(() => {
+    const nightsByLocation = Object.fromEntries(selectedStops.map((s) => [String(s.location || '').toLowerCase(), Number(s.nights || 0)]));
+    const hotelByName = Object.fromEntries((hotels || []).map((h) => [String(h.name || '').toLowerCase(), h]));
+    const vehicleRateByName = Object.fromEntries((vehicles || []).map((v) => [String(v.name || '').toLowerCase(), Number(v.price || 0)]));
+    const activityRateByName = Object.fromEntries((activityMasters || []).map((a) => [String(a.name || '').toLowerCase(), Number(a.price || 0)]));
+
+    const couples = Number(form.couples || 0);
+    const adults = Number(form.adults || 0);
+    const children = Number(form.children || 0);
+    const paxMultiplier = couples + (children * 0.25);
+    const days = Number(form.nights || 0) || getTripDays(form.travel_start_date, form.travel_end_date);
+
+    const hotelItems = (hotelInfoRows || [])
+      .filter((r) => r.hotel)
+      .map((row) => {
+        const meta = hotelByName[String(row.hotel || '').toLowerCase()] || {};
+        const rate = Number(meta.price || 0);
+        const extraAdultRate = Number(meta.extra_adult_price || 0);
+        const nights = Math.max(1, Number(nightsByLocation[String(row.location || '').toLowerCase()] || 0));
+        const rooms = Math.max(1, couples || 0);
+        const amount = (rate * rooms * nights) + (extraAdultRate * adults * nights);
+        return {
+          description: `Hotel: ${row.location} - ${row.hotel}${row.meal ? ` (${row.meal})` : ''}`,
+          quantity: String(rooms * nights),
+          rate: String(rate),
+          amount: String(amount),
+        };
+      });
+
+    const transferItems = (transfers || [])
+      .filter((t) => t.vehicle)
+      .map((t) => {
+        const qty = Number(t.quantity || 1);
+        const rate = Number(vehicleRateByName[String(t.vehicle || '').toLowerCase()] || 0);
+        return {
+          description: `Transfer: ${t.vehicle}`,
+          quantity: String(qty * Math.max(1, days)),
+          rate: String(rate),
+          amount: String(qty * Math.max(1, days) * rate),
+        };
+      });
+
+    const activityItems = (activities || [])
+      .filter((a) => a.activity)
+      .map((a) => {
+        const rate = Number(activityRateByName[String(a.activity || '').toLowerCase()] || 0);
+        return {
+          description: `Activity: ${a.activity}`,
+          quantity: String(Math.max(0, paxMultiplier)),
+          rate: String(rate),
+          amount: String(rate * Math.max(0, paxMultiplier)),
+        };
+      });
+
+    const markupValue = Number(form.markup || 0);
+    const markupItem = markupValue > 0
+      ? [{ description: 'Markup', quantity: '1', rate: String(markupValue), amount: String(markupValue) }]
+      : [];
+
+    const autoItems = [...hotelItems, ...transferItems, ...activityItems, ...markupItem];
+    setForm((prev) => ({ ...prev, items: autoItems.length ? autoItems : [emptyItem()] }));
+  }, [
+    selectedStops,
+    hotels,
+    vehicles,
+    activityMasters,
+    hotelInfoRows,
+    transfers,
+    activities,
+    form.couples,
+    form.adults,
+    form.children,
+    form.nights,
+    form.travel_start_date,
+    form.travel_end_date,
+    form.markup,
+  ]);
+  const tripReferenceText = useMemo(() => {
+    const itineraryLine = selectedItineraryOption?.label || form.package_name || '-';
+    const stopsLine = selectedStops.length
+      ? selectedStops.map((s) => `${Number(s.nights || 0)}N ${s.location}`).join(' / ')
+      : '-';
+    return [
+      'Trip Reference:',
+      `- State: ${form.state_name || '-'}`,
+      `- Nights: ${form.nights || '-'}`,
+      `- Itinerary: ${itineraryLine}`,
+      `- Route: ${stopsLine}`,
+      `- Destination: ${form.travel_destination || '-'}`,
+      `- Travel Dates: ${form.travel_start_date || '-'} to ${form.travel_end_date || '-'}`,
+      `- Passengers: Couples ${form.couples || '0'}, Adults ${form.adults || '0'}, Children ${form.children || '0'}`,
+      `- Hotels: ${hotelInfoRows.map((r) => `${r.location}: ${r.hotel || '-'}, Meal ${r.meal || '-'}`).join(' | ') || '-'}`,
+      `- Transfers: ${transfers.map((t) => `${t.vehicle || '-'} x ${t.quantity || '1'}`).join(' | ') || '-'}`,
+      `- Activities: ${activities.map((a) => a.activity || '-').join(' | ') || '-'}`,
+      `- Markup: ${form.markup || '0'}`,
+      `- Company: ${form.company_name || '-'} (${form.company_contact || '-'})`,
+    ].join('\n');
+  }, [
+    selectedItineraryOption,
+    selectedStops,
+    form.state_name,
+    form.nights,
+    form.package_name,
+    form.travel_destination,
+    form.travel_start_date,
+    form.travel_end_date,
+    form.couples,
+    form.adults,
+    form.children,
+    form.markup,
+    form.company_name,
+    form.company_contact,
+    hotelInfoRows,
+    transfers,
+    activities,
+  ]);
+  useEffect(() => {
+    if (!form.hotel_category && hotelCategoryOptions.length) {
+      setForm((prev) => ({ ...prev, hotel_category: hotelCategoryOptions[0] }));
+    }
+    if (!form.vehicle_type && vehicleTypeOptions.length) {
+      setForm((prev) => ({ ...prev, vehicle_type: vehicleTypeOptions[0] }));
+    }
+  }, [hotelCategoryOptions, vehicleTypeOptions, form.hotel_category, form.vehicle_type]);
 
   const addItem = () => setForm((f) => ({ ...f, items: [...f.items, emptyItem()] }));
   const updateItem = (i, field, value) => {
@@ -366,8 +645,8 @@ export default function Invoices() {
         rate: Number(i.rate) || 0,
         amount: Number(i.amount) || 0,
       }));
+    const combinedTerms = stripTripReference(form.terms_text || '');
     const payload = {
-      branch_id: form.branch_id ? Number(form.branch_id) : undefined,
       invoice_number: editingId ? undefined : (form.invoice_number || nextNumber),
       booking_id: form.booking_id || null,
       customer_id: Number(form.customer_id),
@@ -386,6 +665,7 @@ export default function Invoices() {
       billing_address: form.billing_address || null,
       customer_gst: form.customer_gst || null,
       travel_destination: form.travel_destination || null,
+      state_name: form.state_name || null,
       travel_start_date: form.travel_start_date || null,
       travel_end_date: form.travel_end_date || null,
       adults: Number(form.adults) || 0,
@@ -393,7 +673,7 @@ export default function Invoices() {
       package_name: form.package_name || null,
       hotel_category: form.hotel_category || null,
       vehicle_type: form.vehicle_type || null,
-      terms_text: form.terms_text || null,
+      terms_text: combinedTerms || null,
       company_gst: form.company_gst || null,
       items,
       created_by: form.sales_executive_id ? Number(form.sales_executive_id) : (user?.id || null),
@@ -426,8 +706,13 @@ export default function Invoices() {
         const a = document.createElement('a');
         a.href = url;
         a.download = `invoice-${id}.pdf`;
+        // iOS/Safari is more reliable when the link is in DOM
+        a.style.display = 'none';
+        document.body.appendChild(a);
         a.click();
-        window.URL.revokeObjectURL(url);
+        a.remove();
+        // give the browser a moment to start the download
+        setTimeout(() => window.URL.revokeObjectURL(url), 1200);
         toast('PDF downloaded');
       })
       .catch(() => toast('Download failed', 'error'));
@@ -522,20 +807,6 @@ export default function Invoices() {
           <Card>
             <h3 className="text-sm font-semibold text-slate-700 mb-3">Basic Invoice Info</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Branch *</label>
-                <select
-                  value={form.branch_id || (branchId !== 'all' ? String(branchId) : '')}
-                  onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  required
-                >
-                  <option value="">— Select Branch —</option>
-                  {branches.map((b) => (
-                    <option key={b.id} value={String(b.id)}>{b.name} ({b.code})</option>
-                  ))}
-                </select>
-              </div>
               <Input label="Invoice Number" value={editingId ? form.invoice_number : (form.invoice_number || nextNumber)} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} placeholder="Auto" disabled={!!editingId} />
               <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={(e) => setForm({ ...form, invoice_date: e.target.value })} required />
               <div>
@@ -573,21 +844,95 @@ export default function Invoices() {
             <h3 className="text-sm font-semibold text-slate-700 mb-3">Travel Details</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Package Name</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
                 <select
-                  value={form.package_id}
-                  onChange={(e) => onPackageSelect(e.target.value)}
+                  value={form.state_name}
+                  onChange={(e) => setForm((prev) => ({
+                    ...prev,
+                    state_name: e.target.value,
+                    nights: '',
+                    itinerary_id: '',
+                    package_name: '',
+                    travel_destination: '',
+                  }))}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 >
-                  <option value="">— Select Package —</option>
-                  {packages.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {(p.name || p.title)} — ₹{Number(p.price || 0).toLocaleString()}
+                  <option value="">— Select State —</option>
+                  {stateOptions.map((stateName) => (
+                    <option key={stateName} value={stateName}>
+                      {stateName}
                     </option>
                   ))}
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nights</label>
+                <select
+                  value={form.nights}
+                  onChange={(e) => setForm((prev) => ({
+                    ...prev,
+                    nights: e.target.value,
+                    itinerary_id: '',
+                    package_name: '',
+                    travel_destination: '',
+                  }))}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  disabled={!form.state_name}
+                >
+                  <option value="">{form.state_name ? '— Select Nights —' : 'Select state first'}</option>
+                  {nightsOptions.map((n) => (
+                    <option key={n} value={n}>{n} Nights</option>
+                  ))}
+                </select>
+                {noItineraryForSelectedNights && (
+                  <p className="mt-1 text-xs text-amber-600">No itinerary available for selected nights.</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Itinerary</label>
+                <select
+                  value={form.itinerary_id}
+                  onChange={(e) => onItinerarySelect(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  disabled={!form.state_name}
+                >
+                  <option value="">{form.state_name ? '— Select Itinerary —' : 'Select state first'}</option>
+                  {filteredItineraryOptions.map((item) => (
+                    <option key={item.id} value={item.id}>{item.label}</option>
+                  ))}
+                </select>
+              </div>
+              {!!selectedStops.length && (
+                <div className="md:col-span-3 border border-slate-200 rounded-lg overflow-hidden">
+                  <div className="bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">Itinerary Breakdown</div>
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="text-left px-3 py-2">Nights</th>
+                        <th className="text-left px-3 py-2">Location</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedStops.map((s, idx) => (
+                        <tr key={`${s.location}-${idx}`} className="border-t border-slate-100">
+                          <td className="px-3 py-2">{Number(s.nights || 0)}</td>
+                          <td className="px-3 py-2">{s.location}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               <Input label="Destination" value={form.travel_destination} onChange={(e) => setForm({ ...form, travel_destination: e.target.value })} />
+              <Input
+                label="No. of Couples"
+                type="number"
+                min="0"
+                value={form.couples}
+                onChange={(e) =>
+                  setForm((prev) => recalcPackageItems({ ...prev, couples: e.target.value }))
+                }
+              />
               <Input
                 label="Adults"
                 type="number"
@@ -614,8 +959,122 @@ export default function Invoices() {
                   setForm((prev) => recalcPackageItems({ ...prev, travel_end_date: e.target.value }))
                 }
               />
-              <Input label="Hotel Category" value={form.hotel_category} onChange={(e) => setForm({ ...form, hotel_category: e.target.value })} />
-              <Input label="Vehicle Type" value={form.vehicle_type} onChange={(e) => setForm({ ...form, vehicle_type: e.target.value })} />
+            </div>
+          </Card>
+
+          <Card>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3">Hotel Info</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Star (All Locations)</label>
+                <select
+                  value={hotelStarFilter}
+                  onChange={(e) => {
+                    const star = e.target.value;
+                    setHotelStarFilter(star);
+                    setHotelInfoRows((prev) => prev.map((row) => {
+                      const options = (hotelOptionsByLocation[row.location] || []).filter((h) => !star || !h.star || h.star === star);
+                      const ok = options.some((h) => h.name === row.hotel);
+                      return ok ? row : { ...row, hotel: '' };
+                    }));
+                  }}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">Select star</option>
+                  <option value="1">1 Star</option>
+                  <option value="2">2 Star</option>
+                  <option value="3">3 Star</option>
+                  <option value="4">4 Star</option>
+                  <option value="5">5 Star</option>
+                </select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {hotelInfoRows.map((row, idx) => (
+                <div key={`${row.location}-${idx}`} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <input value={row.location} readOnly className="h-10 rounded-lg border border-slate-200 bg-slate-100 px-3 text-sm" />
+                  <select
+                    value={row.hotel}
+                    onChange={(e) => setHotelInfoRows((prev) => prev.map((r, i) => (i === idx ? { ...r, hotel: e.target.value } : r)))}
+                    className="h-10 rounded-lg border border-slate-300 px-3 text-sm"
+                  >
+                    <option value="">Select hotel</option>
+                    {(hotelOptionsByLocation[row.location] || [])
+                      .filter((h) => !hotelStarFilter || !h.star || h.star === hotelStarFilter)
+                      .map((h) => <option key={h.name} value={h.name}>{h.name}</option>)}
+                  </select>
+                  <select
+                    value={row.meal}
+                    onChange={(e) => setHotelInfoRows((prev) => prev.map((r, i) => (i === idx ? { ...r, meal: e.target.value } : r)))}
+                    className="h-10 rounded-lg border border-slate-300 px-3 text-sm"
+                  >
+                    <option value="">Select meal</option>
+                    <option value="CP">CP</option>
+                    <option value="MAP">MAP</option>
+                    <option value="AP">AP</option>
+                    <option value="EP">EP</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3">Transfer Details</h3>
+            <div className="space-y-2">
+              {transfers.map((row, idx) => (
+                <div key={`t-${idx}`} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <select
+                    value={row.vehicle}
+                    onChange={(e) => setTransfers((prev) => prev.map((r, i) => (i === idx ? { ...r, vehicle: e.target.value } : r)))}
+                    className="h-10 rounded-lg border border-slate-300 px-3 text-sm"
+                  >
+                    <option value="">Select vehicle</option>
+                    {vehicleTypeOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    value={row.quantity}
+                    onChange={(e) => setTransfers((prev) => prev.map((r, i) => (i === idx ? { ...r, quantity: e.target.value } : r)))}
+                    className="h-10 rounded-lg border border-slate-300 px-3 text-sm"
+                  />
+                  <Button type="button" variant="secondary" onClick={() => setTransfers((prev) => [...prev, { vehicle: '', quantity: '1' }])}>Add</Button>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3">Activity</h3>
+            <div className="space-y-2">
+              {activities.map((row, idx) => (
+                <div key={`a-${idx}`} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <select
+                    value={row.activity}
+                    onChange={(e) => setActivities((prev) => prev.map((r, i) => (i === idx ? { ...r, activity: e.target.value } : r)))}
+                    className="h-10 rounded-lg border border-slate-300 px-3 text-sm"
+                  >
+                    <option value="">Select activity</option>
+                    {activityOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                  <input
+                    readOnly
+                    value={row.activity ? `Rs. ${Number(activityRateMap[String(row.activity).toLowerCase()] || 0).toLocaleString('en-IN')}` : '-'}
+                    className="h-10 rounded-lg border border-slate-200 bg-slate-100 px-3 text-sm text-slate-700"
+                  />
+                  <Button type="button" variant="secondary" onClick={() => setActivities((prev) => [...prev, { activity: '' }])}>Add</Button>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3">Other</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Input label="Markup" type="number" min="0" step="0.01" value={form.markup} onChange={(e) => setForm({ ...form, markup: e.target.value })} />
+              <Input label="Company Contact" value={form.company_contact} onChange={(e) => setForm({ ...form, company_contact: e.target.value })} />
+              <Input label="Company Name" value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} />
             </div>
           </Card>
 
@@ -623,7 +1082,7 @@ export default function Invoices() {
           <Card>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-700">Cost Breakdown</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={addItem}>+ Add Row</Button>
+              <span className="text-xs text-slate-500">Auto calculated from trip details</span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -640,23 +1099,16 @@ export default function Invoices() {
                   {form.items.map((item, i) => (
                     <tr key={i} className="border-b border-slate-100">
                       <td className="py-1 pr-2">
-                        <input
-                          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
-                          placeholder="Description"
-                          value={item.description}
-                          onChange={(e) => updateItem(i, 'description', e.target.value)}
-                        />
+                        <input className="w-full rounded border border-slate-200 bg-slate-100 px-2 py-1.5 text-sm" value={item.description} readOnly />
                       </td>
                       <td className="py-1">
-                        <input type="number" min="0" step="0.01" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" value={item.quantity} onChange={(e) => updateItem(i, 'quantity', e.target.value)} />
+                        <input type="number" className="w-full rounded border border-slate-200 bg-slate-100 px-2 py-1.5 text-sm" value={item.quantity} readOnly />
                       </td>
                       <td className="py-1">
-                        <input type="number" min="0" step="0.01" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" value={item.rate} onChange={(e) => updateItem(i, 'rate', e.target.value)} />
+                        <input type="number" className="w-full rounded border border-slate-200 bg-slate-100 px-2 py-1.5 text-sm" value={item.rate} readOnly />
                       </td>
                       <td className="py-1 font-medium text-slate-800">₹{(Number(item.amount) || 0).toLocaleString()}</td>
-                      <td className="py-1">
-                        <Button type="button" size="sm" variant="ghost" onClick={() => removeItem(i)}>×</Button>
-                      </td>
+                      <td className="py-1" />
                     </tr>
                   ))}
                 </tbody>

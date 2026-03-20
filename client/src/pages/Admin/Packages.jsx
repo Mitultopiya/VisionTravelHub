@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getPackages, deletePackage, uploadBaseUrl, downloadItinerary } from '../../services/api';
+import { getPackages, deletePackage, uploadBaseUrl } from '../../services/api';
 import Loading from '../../components/Loading';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -14,7 +14,6 @@ export default function Packages() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewModal, setViewModal] = useState({ open: false, data: null });
-  const [downloadingId, setDownloadingId] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -33,48 +32,6 @@ export default function Packages() {
     setViewModal({ open: true, data: row });
   };
 
-  const handleDownloadPdf = (row) => {
-    setDownloadingId(row.id);
-    downloadItinerary(row.id)
-      .then((res) => {
-        const blob = new Blob([res.data], { type: 'application/pdf' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `itinerary-${row.id}.pdf`;
-        a.click();
-        window.URL.revokeObjectURL(url);
-        toast('Itinerary PDF downloaded');
-      })
-      .catch(() => toast('Download failed', 'error'))
-      .finally(() => setDownloadingId(null));
-  };
-
-  const handlePrintPdf = (row) => {
-    setDownloadingId(row.id);
-    downloadItinerary(row.id)
-      .then((res) => {
-        const blob = new Blob([res.data], { type: 'application/pdf' });
-        const url = window.URL.createObjectURL(blob);
-        const win = window.open(url, '_blank');
-        if (!win) {
-          toast('Allow pop-ups to print itinerary', 'error');
-          window.URL.revokeObjectURL(url);
-          return;
-        }
-        const tryPrint = () => {
-          try {
-            win.focus();
-            win.print();
-          } catch (e) {
-            // ignore
-          }
-        };
-        setTimeout(tryPrint, 800);
-      })
-      .catch(() => toast('Print failed', 'error'))
-      .finally(() => setDownloadingId(null));
-  };
 
   const columns = [
     {
@@ -121,22 +78,6 @@ export default function Packages() {
               <div className="flex justify-end gap-1.5">
                 <Button size="sm" variant="ghost" onClick={() => handleView(row)}>
                   View
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => handleDownloadPdf(row)}
-                  disabled={downloadingId === row.id}
-                >
-                  {downloadingId === row.id ? 'Downloading…' : 'PDF'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => handlePrintPdf(row)}
-                  disabled={downloadingId === row.id}
-                >
-                  Print
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => navigate(`/admin/package-builder/${row.id}`)}>
                   Edit
@@ -230,13 +171,6 @@ export default function Packages() {
                 onClick={() => setViewModal({ open: false, data: null })}
               >
                 Close
-              </Button>
-              <Button
-                type="button"
-                onClick={() => handleDownloadPdf(viewModal.data)}
-                disabled={downloadingId === viewModal.data.id}
-              >
-                {downloadingId === viewModal.data.id ? 'Downloading…' : 'Download Itinerary PDF'}
               </Button>
             </div>
           </div>

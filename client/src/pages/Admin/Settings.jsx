@@ -222,6 +222,7 @@ export default function Settings() {
               setSelectedBranchId(val);
               if (typeof window !== 'undefined') {
                 localStorage.setItem('vth_selected_branch_id', val);
+                window.dispatchEvent(new Event('vth_branch_changed'));
               }
             }}
             className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 bg-white min-w-[160px] focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none"

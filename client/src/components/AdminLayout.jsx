@@ -15,6 +15,7 @@ import {
   FaBuilding,
   FaUniversity,
   FaQrcode,
+  FaCalculator,
 } from 'react-icons/fa';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -30,8 +31,11 @@ const adminNav = [
       { to: '/admin/payment-slip', label: 'Payment Slip', icon: FaFileInvoice },
     ],
   },
-  { to: '/admin/packages', label: 'Packages', icon: FaCube },
-  { to: '/admin/package-builder', label: 'Package Builder', icon: FaCog },
+  // Temporarily hidden menu items:
+  // { to: '/admin/packages', label: 'Packages', icon: FaCube },
+  // { to: '/admin/package-builder', label: 'Package Builder', icon: FaCog },
+  { to: '/admin/itinerary', label: 'Itinerary', icon: FaMapMarkerAlt },
+  { to: '/admin/rate-calculator', label: 'Rate Calculator', icon: FaCalculator },
   {
     label: 'Preferred Items',
     icon: FaStar,
